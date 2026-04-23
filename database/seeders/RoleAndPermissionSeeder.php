@@ -1,0 +1,55 @@
+<?php
+
+namespace Database\Seeders;
+
+use Illuminate\Database\Console\Seeds\WithoutModelEvents;
+use Illuminate\Database\Seeder;
+
+use App\Models\User;
+use Illuminate\Support\Facades\Hash;
+use Spatie\Permission\Models\Role;
+
+class RoleAndPermissionSeeder extends Seeder
+{
+    /**
+     * Run the database seeds.
+     */
+    public function run(): void
+    {
+        $permissions = [
+            'view_visits', 'create_visits', 'export_visits', 'checkout_visits',
+            'view_staffs', 'manage_staffs',
+            'view_cards', 'manage_cards',
+            'view_users', 'manage_users',
+            'view_roles', 'manage_roles',
+        ];
+
+        foreach ($permissions as $permission) {
+            \Spatie\Permission\Models\Permission::firstOrCreate(['name' => $permission]);
+        }
+
+        $adminRole = Role::firstOrCreate(['name' => 'administrator']);
+        $adminRole->syncPermissions(\Spatie\Permission\Models\Permission::all());
+
+        $securityRole = Role::firstOrCreate(['name' => 'security']);
+        $securityRole->syncPermissions(['view_visits', 'create_visits', 'checkout_visits', 'view_staffs', 'view_cards']);
+
+        $admin = User::firstOrCreate(
+            ['email' => 'admin@vms.local'],
+            [
+                'name' => 'Admin User',
+                'password' => Hash::make('password123')
+            ]
+        );
+        $admin->syncRoles([$adminRole->name]);
+
+        $security = User::firstOrCreate(
+            ['email' => 'security@vms.local'],
+            [
+                'name' => 'Security Guard',
+                'password' => Hash::make('password123')
+            ]
+        );
+        $security->syncRoles([$securityRole->name]);
+    }
+}

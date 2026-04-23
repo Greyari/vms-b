@@ -1,0 +1,19 @@
+{
+    "agents": [
+        "gemini",
+        "junie"
+    ],
+    "guidelines": true,
+    "mcp": true,
+    "nightwatch_mcp": false,
+    "packages": [
+        "spatie/laravel-permission"
+    ],
+    "sail": false,
+    "skills": [
+        "laravel-best-practices",
+        "pest-testing",
+        "tailwindcss-development",
+        "laravel-permission-development"
+    ]
+}
