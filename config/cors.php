@@ -15,7 +15,14 @@ return [
     |
     */
 
-    'paths' => ['api/*', 'sanctum/csrf-cookie'],
+    /*
+     * Production  → IIS web.config yang handle CORS via <httpProtocol><customHeaders>.
+     * Local/Dev   → Laravel yang handle CORS (php artisan serve tidak pakai IIS).
+     *
+     * Ini mencegah duplicate CORS header (IIS + Laravel secara bersamaan)
+     * yang menyebabkan browser menolak response.
+     */
+    'paths' => app()->environment('production') ? [] : ['api/*', 'sanctum/csrf-cookie'],
 
     'allowed_methods' => ['*'],
 
