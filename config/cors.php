@@ -16,13 +16,15 @@ return [
     */
 
     /*
-     * Production  → IIS web.config yang handle CORS via <httpProtocol><customHeaders>.
-     * Local/Dev   → Laravel yang handle CORS (php artisan serve tidak pakai IIS).
+     * CORS ditangani sepenuhnya oleh IIS via web.config <httpProtocol><customHeaders>.
+     * Laravel tidak perlu menambahkan CORS header — jika keduanya aktif akan terjadi
+     * duplicate header yang menyebabkan browser menolak response.
      *
-     * Ini mencegah duplicate CORS header (IIS + Laravel secara bersamaan)
-     * yang menyebabkan browser menolak response.
+     * Untuk local development: gunakan Vite proxy (lihat vite.config.ts)
+     * sehingga request dari browser ke /api diteruskan ke localhost:8000
+     * tanpa melibatkan CORS sama sekali.
      */
-    'paths' => app()->environment('production') ? [] : ['api/*', 'sanctum/csrf-cookie'],
+    'paths' => [],
 
     'allowed_methods' => ['*'],
 
