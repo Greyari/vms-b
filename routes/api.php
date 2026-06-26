@@ -1,5 +1,8 @@
 <?php
 
+use App\Http\Controllers\Api\PermissionController;
+use App\Http\Controllers\Api\RoleController;
+use App\Http\Controllers\Api\VehicleCardController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -36,7 +39,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/visits', [VisitController::class, 'store']);
     Route::post('/visits/{id}/checkout', [VisitController::class, 'checkout']);
     Route::delete('/visits/{id}', [VisitController::class, 'destroy']);
-    
+
     // Master Data Routes
     Route::get('/staffs/template/download', [StaffController::class, 'downloadTemplate']);
     Route::post('/staffs/import', [StaffController::class, 'import']);
@@ -50,14 +53,14 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/cards/{id}/restore', [CardController::class, 'restore']);
     Route::apiResource('cards', CardController::class);
 
-    Route::get('/vehicle-cards/template/download', [App\Http\Controllers\Api\VehicleCardController::class, 'downloadTemplate']);
-    Route::post('/vehicle-cards/import', [App\Http\Controllers\Api\VehicleCardController::class, 'import']);
-    Route::get('/vehicle-cards/trashed', [App\Http\Controllers\Api\VehicleCardController::class, 'trashed']);
-    Route::post('/vehicle-cards/{id}/restore', [App\Http\Controllers\Api\VehicleCardController::class, 'restore']);
-    Route::apiResource('vehicle-cards', App\Http\Controllers\Api\VehicleCardController::class);
-    
+    Route::get('/vehicle-cards/template/download', [VehicleCardController::class, 'downloadTemplate']);
+    Route::post('/vehicle-cards/import', [VehicleCardController::class, 'import']);
+    Route::get('/vehicle-cards/trashed', [VehicleCardController::class, 'trashed']);
+    Route::post('/vehicle-cards/{id}/restore', [VehicleCardController::class, 'restore']);
+    Route::apiResource('vehicle-cards', VehicleCardController::class);
+
     // System Settings Routes
-    Route::get('/permissions', [App\Http\Controllers\Api\PermissionController::class, 'index']);
-    Route::apiResource('roles', App\Http\Controllers\Api\RoleController::class);
+    Route::get('/permissions', [PermissionController::class, 'index']);
+    Route::apiResource('roles', RoleController::class);
     Route::apiResource('users', UserController::class);
 });
