@@ -24,7 +24,9 @@ return [
      * sehingga request dari browser ke /api diteruskan ke localhost:8000
      * tanpa melibatkan CORS sama sekali.
      */
-    'paths' => [],
+    'paths' => [
+        'api/*',
+    ],
 
     'allowed_methods' => ['*'],
 
