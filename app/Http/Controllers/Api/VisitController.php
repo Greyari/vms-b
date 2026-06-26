@@ -48,7 +48,7 @@ class VisitController extends Controller
             ->whereNull('time_out')
             ->orderBy('created_at', 'desc')
             ->get();
-            
+
         $visits->transform(function ($visit) {
             $visit->time_in = \Carbon\Carbon::parse($visit->time_in)->format('H:i');
             return $visit;
@@ -61,7 +61,7 @@ class VisitController extends Controller
     {
         $query = Visit::with(['visitor', 'staff', 'visitorCards', 'vehicleCard'])->orderBy('created_at', 'desc');
 
-        if ($request->has('start_date') && $request->has('end_date') && 
+        if ($request->has('start_date') && $request->has('end_date') &&
             $request->start_date !== '' && $request->end_date !== '') {
             $query->whereBetween('date', [$request->start_date, $request->end_date]);
         }
@@ -88,7 +88,7 @@ class VisitController extends Controller
             DB::beginTransaction();
 
             $visitorData = [
-                'name' => $validated['name'], 
+                'name' => $validated['name'],
                 'company' => $validated['company']
             ];
 
@@ -104,6 +104,24 @@ class VisitController extends Controller
             // Update RFID if missing but provided now
             if (!empty($validated['rfid_uid']) && $visitor->rfid_uid !== $validated['rfid_uid']) {
                 $visitor->update(['rfid_uid' => $validated['rfid_uid']]);
+            }
+
+            // Block if visitor is blacklisted
+            if ($visitor->is_blacklisted) {
+                DB::rollBack();
+                return response()->json([
+                    'message' => 'This visitor is blacklisted and cannot be registered for a new visit.',
+                    'reason' => $visitor->blacklist_reason,
+                ], 422);
+            }
+
+            // Block if visitor already has an active visit (not checked out yet)
+            $hasActiveVisit = Visit::where('visitor_id', $visitor->id)->whereNull('time_out')->exists();
+            if ($hasActiveVisit) {
+                DB::rollBack();
+                return response()->json([
+                    'message' => 'This visitor is already checked in and currently has an active visit.',
+                ], 422);
             }
 
             // Verify visitor cards are available
@@ -257,7 +275,7 @@ class VisitController extends Controller
         // Since Spatie SimpleExcel download stream is actually meant to be returned directly as a streamed response
         return response()->streamDownload(function () use ($visits) {
             $writer = SimpleExcelWriter::streamDownload('visits.xlsx');
-            
+
             foreach ($visits as $visit) {
                 $writer->addRow([
                     'Date' => $visit->date,

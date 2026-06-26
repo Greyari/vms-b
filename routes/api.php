@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\PermissionController;
 use App\Http\Controllers\Api\RoleController;
 use App\Http\Controllers\Api\VehicleCardController;
+use App\Http\Controllers\Api\VisitorController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -40,6 +41,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/visits/{id}/checkout', [VisitController::class, 'checkout']);
     Route::delete('/visits/{id}', [VisitController::class, 'destroy']);
 
+    // Visitor Routes
+    Route::get('/visitors', [VisitorController::class, 'index']);
+    Route::put('/visitors/{id}', [VisitorController::class, 'update']);
+    Route::post('/visitors/{id}/blacklist', [VisitorController::class, 'blacklist']);
+    Route::post('/visitors/{id}/unblacklist', [VisitorController::class, 'unblacklist']);
+    Route::delete('/visitors/{id}', [VisitorController::class, 'destroy']);
+    
     // Master Data Routes
     Route::get('/staffs/template/download', [StaffController::class, 'downloadTemplate']);
     Route::post('/staffs/import', [StaffController::class, 'import']);
