@@ -47,6 +47,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/visitors/{id}/blacklist', [VisitorController::class, 'blacklist']);
     Route::post('/visitors/{id}/unblacklist', [VisitorController::class, 'unblacklist']);
     Route::delete('/visitors/{id}', [VisitorController::class, 'destroy']);
+    Route::get('/visitors/blacklisted', [VisitorController::class, 'blacklisted']);
+    Route::get('/visitors/blacklisted/export', [VisitorController::class, 'exportBlacklist']);
+    Route::get('/visitors/blacklisted/template', [VisitorController::class, 'downloadBlacklistTemplate']);
+    Route::post('/visitors/blacklisted/import', [VisitorController::class, 'importBlacklist']);
     
     // Master Data Routes
     Route::get('/staffs/template/download', [StaffController::class, 'downloadTemplate']);
