@@ -92,6 +92,63 @@ class VisitorController extends Controller
         }
     }
 
+    public function export()
+    {
+        $visitors = Visitor::where('is_blacklisted', false)->orderBy('name')->get();
+
+        return response()->streamDownload(function () use ($visitors) {
+            $writer = SimpleExcelWriter::streamDownload('visitors.xlsx');
+            foreach ($visitors as $v) {
+                $writer->addRow([
+                    'KTP Number' => $v->ktp_number,
+                    'Name'       => $v->name,
+                    'Company'    => $v->company ?? '-',
+                    'RFID UID'   => $v->rfid_uid ?? '-',
+                ]);
+            }
+        }, 'visitors.xlsx');
+    }
+
+    public function downloadTemplate()
+    {
+        return response()->streamDownload(function () {
+            $writer = SimpleExcelWriter::streamDownload('visitor_template.xlsx');
+            $writer->addRow([
+                'KTP Number' => '1234567890123456',
+                'Name'       => 'John Doe',
+                'Company'    => 'PT Example',
+                'RFID UID'   => '',
+            ]);
+        }, 'visitor_template.xlsx');
+    }
+
+    public function import(Request $request)
+    {
+        $request->validate(['file' => 'required|file|mimes:xlsx,csv']);
+
+        $file = $request->file('file');
+        $rows = SimpleExcelReader::create($file->getRealPath(), $file->getClientOriginalExtension())->getRows();
+
+        $imported = 0; $skipped = 0;
+        foreach ($rows as $row) {
+            $ktp = $row['KTP Number'] ?? null;
+            if (!$ktp) { $skipped++; continue; }
+
+            Visitor::updateOrCreate(
+                ['ktp_number' => $ktp],
+                [
+                    'name'     => $row['Name'] ?? 'Unknown',
+                    'company'  => $row['Company'] ?? null,
+                    'rfid_uid' => $row['RFID UID'] ?? null,
+                ]
+            );
+            $imported++;
+        }
+
+        return response()->json([
+            'message' => "Import completed. {$imported} visitor(s) imported, {$skipped} row(s) skipped."
+        ]);
+    }
 
     public function exportBlacklist()
     {
@@ -166,4 +223,6 @@ class VisitorController extends Controller
             'message' => "Import completed. {$imported} visitor(s) blacklisted, {$skipped} row(s) skipped due to missing data."
         ]);
     }
+
+
 }
