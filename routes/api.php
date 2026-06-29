@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\StaffController;
 use App\Http\Controllers\Api\CardController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\ProfileController;
+use App\Http\Controllers\Api\DashboardController;
 
 Route::post('/login', [AuthController::class, 'login']);
 
@@ -22,6 +23,9 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     Route::post('/logout', [AuthController::class, 'logout']);
+
+    // Dashboard Route
+    Route::get('/dashboard', [DashboardController::class, 'index']);
 
     // Profile Routes
     Route::get('/profile', [ProfileController::class, 'show']);
