@@ -12,7 +12,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('visitors', function (Blueprint $table) {
-            $table->id();
+            $table->uuid('id')->primary();
             $table->enum('id_type', ['ktp', 'sim', 'passport'])->default('ktp');
             $table->string('id_number')->unique();
             $table->string('name');

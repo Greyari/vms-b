@@ -6,8 +6,9 @@ use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 
 use App\Models\User;
+use App\Models\Role;
+use App\Models\Permission;
 use Illuminate\Support\Facades\Hash;
-use Spatie\Permission\Models\Role;
 
 class RoleAndPermissionSeeder extends Seeder
 {
@@ -25,11 +26,11 @@ class RoleAndPermissionSeeder extends Seeder
         ];
 
         foreach ($permissions as $permission) {
-            \Spatie\Permission\Models\Permission::firstOrCreate(['name' => $permission]);
+            Permission::firstOrCreate(['name' => $permission]);
         }
 
         $adminRole = Role::firstOrCreate(['name' => 'administrator']);
-        $adminRole->syncPermissions(\Spatie\Permission\Models\Permission::all());
+        $adminRole->syncPermissions(Permission::all());
 
         $securityRole = Role::firstOrCreate(['name' => 'security']);
         $securityRole->syncPermissions(['view_visits', 'create_visits', 'checkout_visits', 'view_staffs', 'view_cards']);
