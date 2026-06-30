@@ -6,7 +6,8 @@ use Illuminate\Database\Eloquent\Model;
 
 class Visitor extends Model
 {
-    protected $fillable = ['ktp_number', 'name', 'company', 'rfid_uid', 'is_blacklisted', 'blacklist_reason'];
+    protected $fillable = ['id_type','id_number', 'name', 
+    'company', 'is_blacklisted', 'blacklist_reason'];
 
     public function visits()
     {

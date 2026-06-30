@@ -23,10 +23,10 @@ class VisitorController extends Controller
     public function update(Request $request, $id)
     {
         $validated = $request->validate([
-            'ktp_number' => 'required|string',
-            'name' => 'required|string',
-            'company' => 'nullable|string',
-            'rfid_uid' => 'nullable|string',
+            'id_type'    => 'required|in:ktp,sim,passport',
+            'id_number'  => 'required|string',
+            'name'       => 'required|string',
+            'company'    => 'nullable|string',
         ]);
 
         $visitor = Visitor::findOrFail($id);
@@ -46,7 +46,7 @@ class VisitorController extends Controller
 
         $visitor = Visitor::findOrFail($id);
         $visitor->update([
-            'is_blacklisted' => true,
+            'is_blacklisted'   => true,
             'blacklist_reason' => $validated['reason'],
         ]);
 
@@ -71,7 +71,7 @@ class VisitorController extends Controller
     {
         $visitor = Visitor::findOrFail($id);
         $visitor->update([
-            'is_blacklisted' => false,
+            'is_blacklisted'   => false,
             'blacklist_reason' => null,
         ]);
 
@@ -100,10 +100,10 @@ class VisitorController extends Controller
             $writer = SimpleExcelWriter::streamDownload('visitors.xlsx');
             foreach ($visitors as $v) {
                 $writer->addRow([
-                    'KTP Number' => $v->ktp_number,
-                    'Name'       => $v->name,
-                    'Company'    => $v->company ?? '-',
-                    'RFID UID'   => $v->rfid_uid ?? '-',
+                    'ID Type'  => strtoupper($v->id_type),
+                    'ID Number' => $v->id_number,
+                    'Name'     => $v->name,
+                    'Company'  => $v->company ?? '-',
                 ]);
             }
         }, 'visitors.xlsx');
@@ -114,10 +114,10 @@ class VisitorController extends Controller
         return response()->streamDownload(function () {
             $writer = SimpleExcelWriter::streamDownload('visitor_template.xlsx');
             $writer->addRow([
-                'KTP Number' => '1234567890123456',
-                'Name'       => 'John Doe',
-                'Company'    => 'PT Example',
-                'RFID UID'   => '',
+                'ID Type'   => 'ktp',
+                'ID Number' => '1234567890123456',
+                'Name'      => 'John Doe',
+                'Company'   => 'PT Example',
             ]);
         }, 'visitor_template.xlsx');
     }
@@ -131,15 +131,21 @@ class VisitorController extends Controller
 
         $imported = 0; $skipped = 0;
         foreach ($rows as $row) {
-            $ktp = $row['KTP Number'] ?? null;
-            if (!$ktp) { $skipped++; continue; }
+            $idNumber = $row['ID Number'] ?? null;
+            $idType   = strtolower($row['ID Type'] ?? 'ktp');
+
+            if (!$idNumber) { $skipped++; continue; }
+
+            if (!in_array($idType, ['ktp', 'sim', 'passport'])) {
+                $idType = 'ktp';
+            }
 
             Visitor::updateOrCreate(
-                ['ktp_number' => $ktp],
+                ['id_number' => $idNumber],
                 [
+                    'id_type'  => $idType,
                     'name'     => $row['Name'] ?? 'Unknown',
                     'company'  => $row['Company'] ?? null,
-                    'rfid_uid' => $row['RFID UID'] ?? null,
                 ]
             );
             $imported++;
@@ -156,13 +162,13 @@ class VisitorController extends Controller
 
         return response()->streamDownload(function () use ($visitors) {
             $writer = SimpleExcelWriter::streamDownload('blacklisted_visitors.xlsx');
-
             foreach ($visitors as $visitor) {
                 $writer->addRow([
-                    'KTP Number' => $visitor->ktp_number,
-                    'Name' => $visitor->name,
-                    'Company' => $visitor->company ?? '-',
-                    'Reason' => $visitor->blacklist_reason ?? '-',
+                    'ID Type'   => strtoupper($visitor->id_type),
+                    'ID Number' => $visitor->id_number,
+                    'Name'      => $visitor->name,
+                    'Company'   => $visitor->company ?? '-',
+                    'Reason'    => $visitor->blacklist_reason ?? '-',
                 ]);
             }
         }, 'blacklisted_visitors.xlsx');
@@ -173,46 +179,47 @@ class VisitorController extends Controller
         return response()->streamDownload(function () {
             $writer = SimpleExcelWriter::streamDownload('blacklist_template.xlsx');
             $writer->addRow([
-                'KTP Number' => '1234567890123456',
-                'Name' => 'John Doe',
-                'Company' => 'PT Example',
-                'Reason' => 'Reason for blacklist',
+                'ID Type'   => 'ktp',
+                'ID Number' => '1234567890123456',
+                'Name'      => 'John Doe',
+                'Company'   => 'PT Example',
+                'Reason'    => 'Reason for blacklist',
             ]);
         }, 'blacklist_template.xlsx');
     }
 
     public function importBlacklist(Request $request)
     {
-        $request->validate([
-            'file' => 'required|file|mimes:xlsx,csv',
-        ]);
+        $request->validate(['file' => 'required|file|mimes:xlsx,csv']);
 
-        $file = $request->file('file');
+        $file      = $request->file('file');
         $extension = $file->getClientOriginalExtension();
-        $rows = SimpleExcelReader::create($file->getRealPath(), $extension)->getRows();
+        $rows      = SimpleExcelReader::create($file->getRealPath(), $extension)->getRows();
 
-        $imported = 0;
-        $skipped = 0;
+        $imported = 0; $skipped = 0;
 
         foreach ($rows as $row) {
-            $ktp = $row['KTP Number'] ?? null;
-            $reason = $row['Reason'] ?? null;
+            $idNumber = $row['ID Number'] ?? null;
+            $reason   = $row['Reason'] ?? null;
+            $idType   = strtolower($row['ID Type'] ?? 'ktp');
 
-            if (!$ktp || !$reason) {
-                $skipped++;
-                continue;
+            if (!$idNumber || !$reason) { $skipped++; continue; }
+
+            if (!in_array($idType, ['ktp', 'sim', 'passport'])) {
+                $idType = 'ktp';
             }
 
             $visitor = Visitor::firstOrCreate(
-                ['ktp_number' => $ktp],
+                ['id_number' => $idNumber],
                 [
-                    'name' => $row['Name'] ?? 'Unknown',
+                    'id_type' => $idType,
+                    'name'    => $row['Name'] ?? 'Unknown',
                     'company' => $row['Company'] ?? null,
                 ]
             );
 
             $visitor->update([
-                'is_blacklisted' => true,
+                'is_blacklisted'   => true,
                 'blacklist_reason' => $reason,
             ]);
 

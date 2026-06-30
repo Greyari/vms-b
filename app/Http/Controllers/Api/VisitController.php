@@ -17,24 +17,16 @@ class VisitController extends Controller
 {
     public function checkKtp($ktp)
     {
-        $visitor = Visitor::where('ktp_number', $ktp)->first();
-        return response()->json($visitor); // Returns null if not found
-    }
-
-    public function checkRfid($uid)
-    {
-        $visitor = Visitor::where('rfid_uid', $uid)->first();
+        $visitor = Visitor::where('id_number', $ktp)->first();
         return response()->json($visitor);
     }
 
     public function searchVisitor(Request $request)
     {
         $q = $request->query('q');
-        if (!$q) {
-            return response()->json([]);
-        }
+        if (!$q) return response()->json([]);
 
-        $visitors = Visitor::where('ktp_number', 'like', "%{$q}%")
+        $visitors = Visitor::where('id_number', 'like', "%{$q}%")
             ->orWhere('name', 'like', "%{$q}%")
             ->limit(10)
             ->get();
@@ -72,39 +64,31 @@ class VisitController extends Controller
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'ktp_number' => 'required|string',
-            'name' => 'required|string',
-            'company' => 'nullable|string',
-            'rfid_uid' => 'nullable|string',
-            'staff_id' => 'required|exists:staff,id',
-            'card_ids' => 'required|array|min:1',
-            'card_ids.*' => 'exists:visitor_cards,id',
+            'id_type'         => 'required|in:ktp,sim,passport',
+            'id_number'       => 'required|string',
+            'name'            => 'required|string',
+            'company'         => 'nullable|string',
+            'staff_id'        => 'required|exists:staff,id',
+            'card_ids'        => 'required|array|min:1',
+            'card_ids.*'      => 'exists:visitor_cards,id',
             'vehicle_card_id' => 'nullable|exists:vehicle_cards,id',
-            'purpose' => 'required|string',
-            'vehicle_no' => 'nullable|string',
+            'purpose'         => 'required|string',
+            'vehicle_no'      => 'nullable|string',
         ]);
 
         try {
             DB::beginTransaction();
 
             $visitorData = [
-                'name' => $validated['name'],
-                'company' => $validated['company']
+                'id_type' => $validated['id_type'],
+                'name'    => $validated['name'],
+                'company' => $validated['company'],
             ];
 
-            if (!empty($validated['rfid_uid'])) {
-                $visitorData['rfid_uid'] = $validated['rfid_uid'];
-            }
-
             $visitor = Visitor::firstOrCreate(
-                ['ktp_number' => $validated['ktp_number']],
+                ['id_number' => $validated['id_number']],
                 $visitorData
             );
-
-            // Update RFID if missing but provided now
-            if (!empty($validated['rfid_uid']) && $visitor->rfid_uid !== $validated['rfid_uid']) {
-                $visitor->update(['rfid_uid' => $validated['rfid_uid']]);
-            }
 
             // Block if visitor is blacklisted
             if ($visitor->is_blacklisted) {
@@ -281,7 +265,8 @@ class VisitController extends Controller
                     'Date' => $visit->date,
                     'Time In' => $visit->time_in,
                     'Time Out' => $visit->time_out ?? '-',
-                    'KTP Number' => $visit->visitor->ktp_number,
+                    'ID Type' => $visit->visitor->id_type,
+                    'ID Number' => $visit->visitor->id_number,
                     'Visitor Name' => $visit->visitor->name,
                     'Company' => $visit->visitor->company ?? '-',
                     'Purpose' => $visit->purpose,

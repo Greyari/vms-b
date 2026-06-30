@@ -36,7 +36,6 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Visit Routes
     Route::get('/visitors/check-ktp/{ktp}', [VisitController::class, 'checkKtp']);
-    Route::get('/visitors/check-rfid/{uid}', [VisitController::class, 'checkRfid']);
     Route::get('/visits/search', [VisitController::class, 'searchVisitor']);
     Route::get('/visits/active', [VisitController::class, 'activeVisits']);
     Route::get('/visits/history', [VisitController::class, 'history']);
