@@ -2,7 +2,6 @@
 
 namespace Database\Seeders;
 
-use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 
 use App\Models\User;
@@ -18,7 +17,8 @@ class RoleAndPermissionSeeder extends Seeder
     public function run(): void
     {
         $permissions = [
-            'view_visits', 'create_visits', 'export_visits', 'checkout_visits',
+            'view_visits', 'create_visits', 'export_visits', 'checkout_visits', 'delete_visits',
+            'view_visitors', 'manage_visitors', 'manage_blacklist',
             'view_staffs', 'manage_staffs',
             'view_cards', 'manage_cards',
             'view_users', 'manage_users',
@@ -30,10 +30,14 @@ class RoleAndPermissionSeeder extends Seeder
         }
 
         $adminRole = Role::firstOrCreate(['name' => 'administrator']);
+        // Admin gets EVERYTHING (incl. the newly added permissions) — this prevents lockout.
         $adminRole->syncPermissions(Permission::all());
 
         $securityRole = Role::firstOrCreate(['name' => 'security']);
-        $securityRole->syncPermissions(['view_visits', 'create_visits', 'checkout_visits', 'view_staffs', 'view_cards']);
+        $securityRole->syncPermissions([
+            'view_visits', 'create_visits', 'checkout_visits',
+            'view_staffs', 'view_cards', 'view_visitors',
+        ]);
 
         $admin = User::firstOrCreate(
             ['email' => 'admin@vms.local'],

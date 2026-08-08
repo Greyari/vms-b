@@ -2,15 +2,15 @@
 
 namespace App\Traits;
 
-use Ramsey\Uuid\Uuid;
+use Illuminate\Support\Str;
 
 trait HasUuidV7
 {
     protected static function bootHasUuidV7(): void
     {
-        static::creating(function ($model) {
+        static::creating(function ($model): void {
             if (empty($model->{$model->getKeyName()})) {
-                $model->{$model->getKeyName()} = Uuid::uuid7()->toString();
+                $model->{$model->getKeyName()} = Str::uuid7()->toString();
             }
         });
     }

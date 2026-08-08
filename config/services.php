@@ -35,4 +35,14 @@ return [
         ],
     ],
 
+    // Master Data integration (Fase 4): visitor auto-fill + blacklist gate.
+    // Disabled = VMS behaves exactly as before.
+    'master_data' => [
+        'enabled' => (bool) env('MASTER_DATA_ENABLED', false),
+        'strict' => (bool) env('MASTER_DATA_BLACKLIST_STRICT', false),
+        'base_url' => env('MASTER_DATA_BASE_URL', 'http://localhost:8001/api/v1'),
+        'email' => env('MASTER_DATA_SVC_EMAIL', 'svc-vms@asl.local'),
+        'password' => env('MASTER_DATA_SVC_PASSWORD'),
+    ],
+
 ];

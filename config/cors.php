@@ -16,13 +16,16 @@ return [
     */
 
     /*
-     * CORS ditangani sepenuhnya oleh IIS via web.config <httpProtocol><customHeaders>.
-     * Laravel tidak perlu menambahkan CORS header — jika keduanya aktif akan terjadi
-     * duplicate header yang menyebabkan browser menolak response.
+     * Laravel handles CORS for api/* directly (via this config + the
+     * HandleCors middleware) — there is no IIS/Vite-proxy layer in front of
+     * it. `allowed_origins` lists the browser origins allowed to call the API.
      *
-     * Untuk local development: gunakan Vite proxy (lihat vite.config.ts)
-     * sehingga request dari browser ke /api diteruskan ke localhost:8000
-     * tanpa melibatkan CORS sama sekali.
+     * Production topology (owner, 2026-07-18) — NOT a mismatch, two roles:
+     *   Frontend  https://vms.cemaraintan.id    (cPanel shared hosting) — this is
+     *             the browser ORIGIN that calls the API, so it is listed below.
+     *   Backend   https://frs.aslmarine.com/vms  (Singapore VPS) — where this API
+     *             is served; it is the frontend's API base URL, NOT a CORS origin.
+     * Local dev uses the Vite dev server on 5173/5174.
      */
     'paths' => [
         'api/*',
@@ -35,6 +38,9 @@ return [
         'http://localhost:5173',
         'http://localhost:5174',
         'http://localhost:8000',
+        // Production frontend origin (cPanel). This is the host the browser
+        // requests come FROM; the backend itself (frs.aslmarine.com) is not an
+        // origin and does not belong here.
         'https://vms.cemaraintan.id',
     ],
 

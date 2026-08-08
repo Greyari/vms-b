@@ -12,23 +12,41 @@ class DashboardController extends Controller
 {
     public function index()
     {
-        $thisMonth = now()->format('Y-m');
+        $monthStart = now()->startOfMonth()->toDateString();
+        $monthEnd = now()->endOfMonth()->toDateString();
 
-        // Stats
-        $activeVisits = Visit::whereNull('time_out')->count();
-        $monthVisits = Visit::where('date', 'like', "{$thisMonth}%")->count();
-        $totalVisitors = Visitor::where('is_blacklisted', false)->count();
-        $blacklistedVisitors = Visitor::where('is_blacklisted', true)->count();
+        // Visit stats — one query, aggregated with conditional counts
+        // (COUNT(*) FILTER works on PostgreSQL and sqlite >= 3.30).
+        $visitStats = Visit::selectRaw('COUNT(*) FILTER (WHERE time_out IS NULL) AS active_visits')
+            ->selectRaw('COUNT(*) FILTER (WHERE date BETWEEN ? AND ?) AS month_visits', [$monthStart, $monthEnd])
+            ->first();
+        $activeVisits = (int) ($visitStats->active_visits ?? 0);
+        $monthVisits = (int) ($visitStats->month_visits ?? 0);
 
-        // Cards
-        $totalCards = VisitorCard::count();
-        $availableCards = VisitorCard::where('status', 'available')->count();
-        $inUseCards = VisitorCard::where('status', 'in_use')->count();
+        // Visitor stats — one query
+        $visitorStats = Visitor::selectRaw('COUNT(*) FILTER (WHERE is_blacklisted = false) AS total_visitors')
+            ->selectRaw('COUNT(*) FILTER (WHERE is_blacklisted = true) AS blacklisted_visitors')
+            ->first();
+        $totalVisitors = (int) ($visitorStats->total_visitors ?? 0);
+        $blacklistedVisitors = (int) ($visitorStats->blacklisted_visitors ?? 0);
 
-        // Vehicle Cards
-        $totalVehicleCards = VehicleCard::count();
-        $availableVehicleCards = VehicleCard::where('status', 'available')->count();
-        $inUseVehicleCards = VehicleCard::where('status', 'in_use')->count();
+        // Visitor-card stats — one query
+        $cardStats = VisitorCard::selectRaw('COUNT(*) AS total')
+            ->selectRaw("COUNT(*) FILTER (WHERE status = 'available') AS available")
+            ->selectRaw("COUNT(*) FILTER (WHERE status = 'in_use') AS in_use")
+            ->first();
+        $totalCards = (int) ($cardStats->total ?? 0);
+        $availableCards = (int) ($cardStats->available ?? 0);
+        $inUseCards = (int) ($cardStats->in_use ?? 0);
+
+        // Vehicle-card stats — one query
+        $vehicleCardStats = VehicleCard::selectRaw('COUNT(*) AS total')
+            ->selectRaw("COUNT(*) FILTER (WHERE status = 'available') AS available")
+            ->selectRaw("COUNT(*) FILTER (WHERE status = 'in_use') AS in_use")
+            ->first();
+        $totalVehicleCards = (int) ($vehicleCardStats->total ?? 0);
+        $availableVehicleCards = (int) ($vehicleCardStats->available ?? 0);
+        $inUseVehicleCards = (int) ($vehicleCardStats->in_use ?? 0);
 
         // Chart — visits per day last 7 days
         $visitsPerDay = Visit::selectRaw('date, COUNT(*) as total')
@@ -57,8 +75,8 @@ class DashboardController extends Controller
                 return [
                     'id' => $visit->id,
                     'ticket_number' => $visit->ticket_number,
-                    'visitor_name' => $visit->visitor->name,
-                    'staff_name' => $visit->staff->name ?? '-',
+                    'visitor_name' => $visit->visitor?->name ?? '-',
+                    'staff_name' => $visit->staff?->name ?? '-',
                     'time_in' => \Carbon\Carbon::parse($visit->time_in)->format('H:i'),
                     'purpose' => $visit->purpose,
                 ];

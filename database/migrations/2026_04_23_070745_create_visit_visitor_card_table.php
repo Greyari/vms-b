@@ -12,9 +12,13 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('visit_visitor_card', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('visit_id')->constrained()->onDelete('cascade');
-            $table->foreignId('visitor_card_id')->constrained()->onDelete('cascade');
+            // The VisitVisitorCard pivot model generates UUIDv7 ids, and
+            // visits + visitor_cards use UUID primary keys — the original
+            // bigint columns could never work on a strict engine (PG rejects
+            // both the FK types and the UUID id values).
+            $table->uuid('id')->primary();
+            $table->foreignUuid('visit_id')->constrained()->onDelete('cascade');
+            $table->foreignUuid('visitor_card_id')->constrained()->onDelete('cascade');
             $table->timestamps();
         });
     }

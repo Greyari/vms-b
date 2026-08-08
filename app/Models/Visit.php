@@ -3,11 +3,12 @@
 namespace App\Models;
 
 use App\Traits\HasUuidV7;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class Visit extends Model
 {
-    use HasUuidV7;
+    use HasFactory, HasUuidV7;
 
     protected $fillable = [
         'visitor_id', 'staff_id', 'vehicle_card_id',
@@ -26,7 +27,7 @@ class Visit extends Model
 
     public function visitorCards()
     {
-        return $this->belongsToMany(VisitorCard::class)->using(VisitVisitorCard::class);
+        return $this->belongsToMany(VisitorCard::class)->using(VisitVisitorCard::class)->withTimestamps();
     }
 
     public function vehicleCard()

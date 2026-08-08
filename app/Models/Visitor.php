@@ -3,16 +3,26 @@
 namespace App\Models;
 
 use App\Traits\HasUuidV7;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class Visitor extends Model
 {
-    use HasUuidV7;
+    use HasFactory, HasUuidV7;
 
     protected $fillable = [
-        'id_type', 'id_number', 'name',
-        'company', 'is_blacklisted', 'blacklist_reason'
+        'id_type', 'id_number', 'name', 'company',
     ];
+
+    /**
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'is_blacklisted' => 'boolean',
+        ];
+    }
 
     public function visits()
     {

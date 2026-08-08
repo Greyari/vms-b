@@ -9,11 +9,7 @@ use Illuminate\Database\Eloquent\Relations\Pivot;
 // doesn't auto-generate a UUID for the id column
 class VisitVisitorCard extends Pivot
 {
-
     use HasUuidV7;
 
     protected $table = 'visit_visitor_card';
-
-    public $incrementing = false;
-    protected $keyType = 'string';
 }

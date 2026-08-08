@@ -24,8 +24,10 @@ class AuthController extends Controller
 
         $user = Auth::user();
         $token = $user->createToken('auth_token')->plainTextToken;
-        
-        $user->load('roles', 'permissions');
+
+        $user->load('roles');
+        // Roles hold the permissions; expose the full effective permission list to the SPA.
+        $user->setRelation('permissions', $user->getAllPermissions());
 
         return response()->json([
             'message' => 'Login success',
@@ -33,6 +35,14 @@ class AuthController extends Controller
             'token_type' => 'Bearer',
             'user' => $user
         ]);
+    }
+
+    public function me(Request $request)
+    {
+        $user = $request->user()->load('roles');
+        $user->setRelation('permissions', $user->getAllPermissions());
+
+        return response()->json($user);
     }
 
     public function logout(Request $request)
