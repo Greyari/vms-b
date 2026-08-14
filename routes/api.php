@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\ActivityLogController;
 use App\Http\Controllers\Api\PermissionController;
 use App\Http\Controllers\Api\RoleController;
 use App\Http\Controllers\Api\VehicleCardController;
@@ -100,4 +101,10 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::apiResource('users', UserController::class)->only(['index', 'show'])->middleware('permission:view_users');
     Route::apiResource('users', UserController::class)->only(['store', 'update', 'destroy'])->middleware('permission:manage_users');
+
+    // --- Activity logs ---------------------------------------------------
+    Route::middleware('permission:view_logs')->group(function () {
+        Route::get('/activity-logs', [ActivityLogController::class, 'index']);
+        Route::get('/activity-logs/subject-types', [ActivityLogController::class, 'subjectTypes']);
+    });
 });

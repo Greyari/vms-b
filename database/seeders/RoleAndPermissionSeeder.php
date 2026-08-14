@@ -23,6 +23,7 @@ class RoleAndPermissionSeeder extends Seeder
             'view_cards', 'manage_cards',
             'view_users', 'manage_users',
             'view_roles', 'manage_roles',
+            'view_logs',
         ];
 
         foreach ($permissions as $permission) {

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\ActivityLogger;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Spatie\Permission\Models\Role;
@@ -40,6 +41,13 @@ class UserController extends Controller
             $user->assignRole('user'); // Default fallback
         }
 
+        ActivityLogger::log(
+            action: 'updated',
+            subject: $user,
+            old: ['roles' => []],
+            new: ['roles' => $user->roles()->pluck('name')->toArray()],
+        );
+
         return response()->json($user->load('roles'), 201);
     }
 
@@ -60,6 +68,8 @@ class UserController extends Controller
             'roles.*' => 'exists:roles,name'
         ]);
 
+        $oldRoles = $user->roles()->pluck('name')->toArray();
+
         $user->name = $validated['name'];
         $user->email = $validated['email'];
         if (!empty($validated['password'])) {
@@ -69,6 +79,20 @@ class UserController extends Controller
 
         if (isset($validated['roles'])) {
             $user->syncRoles($validated['roles']);
+
+            $newRoles = $validated['roles'];
+            sort($oldRoles);
+            $sortedNewRoles = $newRoles;
+            sort($sortedNewRoles);
+
+            if ($oldRoles !== $sortedNewRoles) {
+                ActivityLogger::log(
+                    action: 'updated',
+                    subject: $user,
+                    old: ['roles' => $oldRoles],
+                    new: ['roles' => $sortedNewRoles],
+                );
+            }
         }
 
         return response()->json($user->load('roles'));

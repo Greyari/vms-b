@@ -3,8 +3,9 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Role;
+use App\Services\ActivityLogger;
 use Illuminate\Http\Request;
-use Spatie\Permission\Models\Role;
 
 class RoleController extends Controller
 {
@@ -29,9 +30,15 @@ class RoleController extends Controller
         ]);
 
         $role = Role::create(['name' => $validated['name']]);
-        
+
         if (isset($validated['permissions'])) {
             $role->syncPermissions($validated['permissions']);
+            ActivityLogger::log(
+                action: 'updated',
+                subject: $role,
+                old: ['permissions' => []],
+                new: ['permissions' => $validated['permissions']],
+            );
         }
 
         return response()->json($role->load('permissions'), 201);
@@ -59,10 +66,25 @@ class RoleController extends Controller
             'permissions.*' => 'exists:permissions,name'
         ]);
 
+        $oldPermissions = $role->permissions()->pluck('name')->toArray();
+
         $role->update(['name' => $validated['name']]);
 
         if (isset($validated['permissions'])) {
             $role->syncPermissions($validated['permissions']);
+
+            $newPermissions = $validated['permissions'];
+            sort($oldPermissions);
+            sort($newPermissions);
+
+            if ($oldPermissions !== $newPermissions) {
+                ActivityLogger::log(
+                    action: 'updated',
+                    subject: $role,
+                    old: ['permissions' => $oldPermissions],
+                    new: ['permissions' => $newPermissions],
+                );
+            }
         }
 
         return response()->json($role->load('permissions'));

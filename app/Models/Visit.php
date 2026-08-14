@@ -3,12 +3,13 @@
 namespace App\Models;
 
 use App\Traits\HasUuidV7;
+use App\Traits\LogsActivity;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class Visit extends Model
 {
-    use HasFactory, HasUuidV7;
+    use HasFactory, HasUuidV7, LogsActivity;
 
     protected $fillable = [
         'visitor_id', 'staff_id', 'vehicle_card_id',
