@@ -37,6 +37,11 @@ env:
   IMAGE: vms-api
   RESOURCE_GROUP: rg-init-bt-apps
   APP_NAME: as-api-vms-bt-apps
+  # Gerbang health TIDAK bisa menembak https://<app>.azurewebsites.net:
+  # menaut backend ke Static Web Apps memasang identity provider "Azure Static
+  # Web Apps (Linked)" yang membalas 400 untuk setiap permintaan yang tidak
+  # lewat proksi, jadi pemeriksaan langsung selalu gagal walau aplikasinya sehat.
+  HEALTH_BASE: https://polite-smoke-0595f0500.5.azurestaticapps.net
 
 jobs:
   deploy:
@@ -79,22 +84,30 @@ jobs:
             --container-image-name $REGISTRY/$IMAGE:${{ github.sha }}
 
       # Perintah di atas kembali sebelum container baru melayani, jadi polling.
-      # Ini sekaligus gerbang migrasi: migrasi gagal membuat /up tidak pernah
-      # 200 dan job ini gagal di sini.
-      - name: Wait for the new container to serve /up
+      #
+      # Yang dipanggil sengaja endpoint yang MENYENTUH DATABASE, bukan /up:
+      # POST /api/login dengan kredensial yang pasti salah (membaca database).
+      # /up hanya membuktikan PHP hidup, dan justru itu yang menyamarkan bug
+      # nyata pada deploy pertama: worker php-fpm tidak bisa membuka sertifikat
+      # klien libpq, /up tetap menjawab 200, dan setiap request sungguhan 500.
+      #
+      # Ini sekaligus gerbang migrasi: migrasi yang gagal membuat container keluar
+      # di bawah set -e, endpoint ini tidak pernah menjawab, dan job gagal di sini.
+      - name: Wait for the new container to answer a real request
         run: |
           for i in $(seq 1 30); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' \
-              https://$APP_NAME.azurewebsites.net/up || true)
-            if [ "$code" = "200" ]; then
-              echo "Healthy after $((i * 10))s"
+            code=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: application/json" \
+              -d '{"email":"deploy-healthcheck@invalid.local","password":"x"}' \
+              "$HEALTH_BASE/api/login" || true)
+            if [ "$code" = "401" ] || [ "$code" = "422" ]; then
+              echo "Healthy after $((i * 10))s (HTTP $code)"
               exit 0
             fi
             echo "attempt $i: HTTP $code"
             sleep 10
           done
-          echo "::error::App tidak mengembalikan 200 di /up dalam 5 menit."
-          echo "::error::Lihat 'az webapp log tail' -- migrasi gagal terlihat seperti ini."
+          echo "::error::Aplikasi tidak menjawab dengan benar dalam 5 menit."
+          echo "::error::Jalankan 'az webapp log tail' -- migrasi yang gagal terlihat seperti ini."
           exit 1
 
       # Sengaja tanpa rollback otomatis. Saat gerbang health gagal, migrasi
