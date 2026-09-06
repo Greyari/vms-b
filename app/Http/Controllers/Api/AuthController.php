@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Services\ActivityLogger;
 use Illuminate\Http\Request;
 
 use Illuminate\Support\Facades\Auth;
@@ -17,6 +18,9 @@ class AuthController extends Controller
         ]);
 
         if (!Auth::attempt($request->only('email', 'password'))) {
+            // Record failed attempts too (no causer, since nobody's authenticated yet).
+            ActivityLogger::logEvent('login_failed', ['email' => $request->input('email')]);
+
             return response()->json([
                 'message' => 'Invalid credentials'
             ], 401);
@@ -24,8 +28,12 @@ class AuthController extends Controller
 
         $user = Auth::user();
         $token = $user->createToken('auth_token')->plainTextToken;
-        
-        $user->load('roles', 'permissions');
+
+        ActivityLogger::logEvent('login');
+
+        $user->load('roles');
+        // Roles hold the permissions; expose the full effective permission list to the SPA.
+        $user->setRelation('permissions', $user->getAllPermissions());
 
         return response()->json([
             'message' => 'Login success',
@@ -35,8 +43,18 @@ class AuthController extends Controller
         ]);
     }
 
+    public function me(Request $request)
+    {
+        $user = $request->user()->load('roles');
+        $user->setRelation('permissions', $user->getAllPermissions());
+
+        return response()->json($user);
+    }
+
     public function logout(Request $request)
     {
+        ActivityLogger::logEvent('logout');
+
         $request->user()->currentAccessToken()->delete();
 
         return response()->json([

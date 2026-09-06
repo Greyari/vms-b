@@ -1,49 +1,62 @@
 <?php
 
+use App\Models\User;
+use Database\Seeders\RoleAndPermissionSeeder;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Laravel\Sanctum\Sanctum;
+use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
 
 /*
 |--------------------------------------------------------------------------
 | Test Case
 |--------------------------------------------------------------------------
-|
-| The closure you provide to your test functions is always bound to a specific PHPUnit test
-| case class. By default, that class is "PHPUnit\Framework\TestCase". Of course, you may
-| need to change it using the "pest()" function to bind a different classes or traits.
-|
+| All Feature tests run against sqlite :memory: (see phpunit.xml) with a
+| fresh schema per test. Before each test we seed roles/permissions, flush
+| the spatie permission cache, and force the Master Data integration off so
+| no test performs a real outbound HTTP call unless it opts in with
+| Http::fake().
 */
 
 pest()->extend(TestCase::class)
- // ->use(Illuminate\Foundation\Testing\RefreshDatabase::class)
+    ->use(RefreshDatabase::class)
+    ->beforeEach(function () {
+        $this->seed(RoleAndPermissionSeeder::class);
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+        config(['services.master_data.enabled' => false]);
+    })
     ->in('Feature');
 
 /*
 |--------------------------------------------------------------------------
-| Expectations
+| Helpers
 |--------------------------------------------------------------------------
-|
-| When you're writing tests, you often need to check that values meet certain conditions. The
-| "expect()" function gives you access to a set of "expectations" methods that you can use
-| to assert different things. Of course, you may extend the Expectation API at any time.
-|
 */
 
-expect()->extend('toBeOne', function () {
-    return $this->toBe(1);
-});
-
-/*
-|--------------------------------------------------------------------------
-| Functions
-|--------------------------------------------------------------------------
-|
-| While Pest is very powerful out-of-the-box, you may have some testing code specific to your
-| project that you don't want to repeat in every file. Here you can also expose helpers as
-| global functions to help you to reduce the number of lines of code in your test files.
-|
-*/
-
-function something()
+function adminUser(): User
 {
-    // ..
+    return User::where('email', 'admin@vms.local')->firstOrFail();
+}
+
+function securityUser(): User
+{
+    return User::where('email', 'security@vms.local')->firstOrFail();
+}
+
+/** Authenticate the given user against the sanctum guard with all abilities. */
+function actingAsUser(User $user): User
+{
+    Sanctum::actingAs($user, ['*']);
+
+    return $user;
+}
+
+function actingAsAdmin(): User
+{
+    return actingAsUser(adminUser());
+}
+
+function actingAsSecurity(): User
+{
+    return actingAsUser(securityUser());
 }

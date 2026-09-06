@@ -12,10 +12,13 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('visitors', function (Blueprint $table) {
-            $table->id();
-            $table->string('ktp_number')->unique();
+            $table->uuid('id')->primary();
+            $table->enum('id_type', ['ktp', 'sim', 'passport'])->default('ktp');
+            $table->string('id_number')->unique();
             $table->string('name');
             $table->string('company')->nullable();
+            $table->boolean('is_blacklisted')->default(false);
+            $table->string('blacklist_reason')->nullable();
             $table->timestamps();
         });
     }

@@ -46,7 +46,8 @@
             <tr>
                 <th>NO</th>
                 <th>Visitor Name</th>
-                <th>KTP / ID Number</th>
+                <th>Type ID</th>
+                <th>ID Number</th>
                 <th>Company</th>
                 <th>Purpose Of Visit</th>
                 <th>Staff To Be Seen</th>
@@ -61,9 +62,10 @@
             @foreach($visits as $index => $visit)
             <tr>
                 <td>{{ $index + 1 }}</td>
-                <td>{{ $visit->visitor->name }}</td>
-                <td>{{ $visit->visitor->ktp_number }}</td>
-                <td>{{ $visit->visitor->company ?? '-' }}</td>
+                <td>{{ $visit->visitor?->name ?? '-' }}</td>
+                <td>{{ $visit->visitor?->id_type ?? '-' }}</td>
+                <td>{{ $visit->visitor?->id_number ?? '-' }}</td>
+                <td>{{ $visit->visitor?->company ?? '-' }}</td>
                 <td>{{ $visit->purpose }}</td>
                 <td>{{ $visit->staff?->name ?? 'Unknown' }}</td>
                 <td>{{ $visit->visitorCard?->card_no ?? '-' }}</td>

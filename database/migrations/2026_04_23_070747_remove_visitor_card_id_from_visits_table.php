@@ -23,7 +23,7 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('visits', function (Blueprint $table) {
-            $table->foreignId('visitor_card_id')->nullable()->constrained()->onDelete('cascade');
+            $table->foreignUuid('visitor_card_id')->nullable()->constrained()->onDelete('cascade');
         });
     }
 };
