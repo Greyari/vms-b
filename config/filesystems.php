@@ -47,6 +47,18 @@ return [
             'report' => false,
         ],
 
+        'azure' => [
+            'driver' => 'azure',
+            // Di Azure: endpoint + Managed Identity (tanpa account key sama sekali).
+            'endpoint' => env('AZURE_STORAGE_BLOB_ENDPOINT'),
+            'container' => env('AZURE_STORAGE_CONTAINER'),
+            // Hanya untuk lokal/compose (Azurite atau account key). Kosong di produksi.
+            'connection_string' => env('AZURE_STORAGE_CONNECTION_STRING'),
+            'prefix' => env('AZURE_STORAGE_PREFIX', ''),
+            'throw' => true,
+            'report' => false,
+        ],
+
         's3' => [
             'driver' => 's3',
             'key' => env('AWS_ACCESS_KEY_ID'),
