@@ -34,15 +34,14 @@ return [
     'allowed_methods' => ['*'],
 
     // 'allowed_origins' => ['*'],
-    'allowed_origins' => [
-        'http://localhost:5173',
-        'http://localhost:5174',
-        'http://localhost:8000',
-        // Production frontend origin (cPanel). This is the host the browser
-        // requests come FROM; the backend itself (frs.aslmarine.com) is not an
-        // origin and does not belong here.
-        'https://vms.cemaraintan.id',
-    ],
+    // Daftar bawaan di bawah hanya berlaku kalau CORS_ALLOWED_ORIGINS tidak
+    // disetel. Di Azure origin SPA adalah hostname Static Web Apps, yang tidak
+    // bisa ditulis di sini saat repo dibuat -- dan tanpa jalur env satu-satunya
+    // cara menggantinya adalah rebuild image.
+    'allowed_origins' => array_values(array_filter(array_map('trim', explode(
+        ',',
+        (string) env('CORS_ALLOWED_ORIGINS', implode(',', ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:8000', 'https://vms.cemaraintan.id']))
+    )))),
 
     'allowed_origins_patterns' => [],
 

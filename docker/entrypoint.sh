@@ -14,4 +14,16 @@ if [ "${RUN_MIGRATIONS:-0}" = "1" ]; then
     php artisan migrate --force
 fi
 
+# Permission, role, dan akun awal. Tanpa ini deploy tetap hijau tapi tidak ada
+# satu pun permission di basis data, sehingga tiap endpoint ber-gate menolak
+# semua orang dan tidak ada user yang bisa dibuat untuk memperbaikinya --
+# image ini tidak memasang sshd, jadi tidak ada konsol untuk menambalnya.
+#
+# Seeder-nya idempoten (firstOrCreate/syncPermissions), jadi RUN_SEED yang
+# tertinggal menyala tidak merusak apa pun. Akun hanya lahir kalau
+# VMS_ADMIN_EMAIL dan VMS_ADMIN_PASSWORD keduanya terisi.
+if [ "${RUN_SEED:-0}" = "1" ]; then
+    php artisan db:seed --force --class='Database\Seeders\RoleAndPermissionSeeder'
+fi
+
 exec /usr/bin/supervisord -c /etc/supervisord.conf

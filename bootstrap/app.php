@@ -12,6 +12,19 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        // Di Azure aplikasi ini hanya dicapai lewat Static Web Apps, yang
+        // memproksi /api/* ke App Service. Tanpa mempercayai proksi itu setiap
+        // permintaan tampak datang dari alamat yang sama: kolom IP di
+        // activity_logs mencatat proksi Azure alih-alih pengunjung, dan seluruh
+        // rate limit runtuh jadi satu ember bersama.
+        //
+        // '*' benar di topologi ini karena hostname App Service menolak akses
+        // langsung (400 Bad Request dari identity provider "Azure Static Web
+        // Apps (Linked)" yang terpasang saat backend ditaut), jadi tidak ada
+        // jalan mengirim X-Forwarded-For karangan tanpa lewat proksi. Kalau
+        // tautan backend itu dilepas, baris ini harus ditinjau ulang.
+        $middleware->trustProxies(at: '*');
+
         $middleware->alias([
             'permission' => \Spatie\Permission\Middleware\PermissionMiddleware::class,
             'role' => \Spatie\Permission\Middleware\RoleMiddleware::class,

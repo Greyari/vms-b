@@ -32,5 +32,12 @@
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
+        <!-- Akun yang di-seed untuk test. Dulu tertulis langsung di
+             RoleAndPermissionSeeder dan karena itu ikut lahir di produksi;
+             sekarang kredensialnya tinggal di sini, di mana memang tempatnya. -->
+        <env name="VMS_ADMIN_EMAIL" value="admin@vms.local"/>
+        <env name="VMS_ADMIN_PASSWORD" value="password123"/>
+        <env name="VMS_SECURITY_EMAIL" value="security@vms.local"/>
+        <env name="VMS_SECURITY_PASSWORD" value="password123"/>
     </php>
 </phpunit>

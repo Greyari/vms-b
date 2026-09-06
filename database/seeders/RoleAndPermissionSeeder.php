@@ -40,22 +40,47 @@ class RoleAndPermissionSeeder extends Seeder
             'view_staffs', 'view_cards', 'view_visitors',
         ]);
 
-        $admin = User::firstOrCreate(
-            ['email' => 'admin@vms.local'],
-            [
-                'name' => 'Admin User',
-                'password' => Hash::make('password123')
-            ]
-        );
-        $admin->syncRoles([$adminRole->name]);
+        // Akun awal HANYA dibuat kalau password-nya dipasok dari environment.
+        //
+        // Sebelumnya keduanya lahir dengan password 'password123' yang tertulis
+        // di dalam repo. Di laptop itu sekadar praktis; di Azure endpoint
+        // login-nya bisa dijangkau siapa saja, jadi seeder yang jalan dari
+        // entrypoint container cukup untuk menyerahkan akun administrator
+        // kepada siapa pun yang pernah membaca berkas ini.
+        //
+        // Tanpa env, seeder tetap menanam permission dan role — bagian yang
+        // memang harus ada sebelum user mana pun bisa dibuat — lalu berhenti.
+        // Nilai untuk test suite ada di phpunit.xml, bukan di sini.
+        $adminEmail = (string) env('VMS_ADMIN_EMAIL', '');
+        $adminPassword = (string) env('VMS_ADMIN_PASSWORD', '');
 
-        $security = User::firstOrCreate(
-            ['email' => 'security@vms.local'],
-            [
-                'name' => 'Security Guard',
-                'password' => Hash::make('password123')
-            ]
-        );
-        $security->syncRoles([$securityRole->name]);
+        if ($adminEmail !== '' && $adminPassword !== '') {
+            $admin = User::firstOrCreate(
+                ['email' => $adminEmail],
+                [
+                    'name' => env('VMS_ADMIN_NAME', 'Admin User'),
+                    'password' => Hash::make($adminPassword),
+                ]
+            );
+            $admin->syncRoles([$adminRole->name]);
+        } else {
+            $this->command?->warn('VMS_ADMIN_EMAIL/VMS_ADMIN_PASSWORD kosong — akun admin tidak dibuat.');
+        }
+
+        // Akun penjaga keamanan mengikuti aturan yang sama. Di produksi ia
+        // dibuat lewat panel admin, bukan lewat seeder.
+        $securityEmail = (string) env('VMS_SECURITY_EMAIL', '');
+        $securityPassword = (string) env('VMS_SECURITY_PASSWORD', '');
+
+        if ($securityEmail !== '' && $securityPassword !== '') {
+            $security = User::firstOrCreate(
+                ['email' => $securityEmail],
+                [
+                    'name' => env('VMS_SECURITY_NAME', 'Security Guard'),
+                    'password' => Hash::make($securityPassword),
+                ]
+            );
+            $security->syncRoles([$securityRole->name]);
+        }
     }
 }
