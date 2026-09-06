@@ -8,6 +8,14 @@ storage/framework/cache/*
 storage/framework/sessions/*
 storage/framework/views/*
 storage/app/public/*
+# Kunci penandatangan Passport dan lampiran ber-PII tidak pernah masuk image:
+# COPY . . di stage vendor akan memanggangnya, dan siapa pun yang bisa menarik
+# image itu bisa menandatangani access token untuk user mana pun. Kunci dipasok
+# saat runtime lewat PASSPORT_PRIVATE_KEY / PASSPORT_PUBLIC_KEY.
+storage/*.key
+*.key
+*.pem
+storage/app/private/*
 tests
 .phpunit.cache
 Dockerfile
