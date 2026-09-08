@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 class VisitorCard extends Model
 {
-    use HasFactory, HasUuidV7, SoftDeletes, LogsActivity;
+    use HasFactory, HasUuidV7, LogsActivity, SoftDeletes;
 
     protected $fillable = ['card_no', 'status'];
 

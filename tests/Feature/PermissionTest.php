@@ -1,7 +1,6 @@
 <?php
 
 use App\Models\Staff;
-use App\Models\Visit;
 use App\Models\Visitor;
 use App\Models\VisitorCard;
 

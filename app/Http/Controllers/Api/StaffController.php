@@ -5,8 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Staff;
 use Illuminate\Http\Request;
-use Spatie\SimpleExcel\SimpleExcelWriter;
 use Spatie\SimpleExcel\SimpleExcelReader;
+use Spatie\SimpleExcel\SimpleExcelWriter;
 
 class StaffController extends Controller
 {
@@ -17,7 +17,7 @@ class StaffController extends Controller
             $writer->addRow([
                 'staff_id' => 'ID-001',
                 'name' => 'John Doe',
-                'department' => 'IT'
+                'department' => 'IT',
             ]);
         }, 'staff_template.xlsx');
     }
@@ -25,26 +25,26 @@ class StaffController extends Controller
     public function import(Request $request)
     {
         $request->validate([
-            'file' => 'required|file|mimes:xlsx,csv'
+            'file' => 'required|file|mimes:xlsx,csv',
         ]);
 
         try {
             $file = $request->file('file');
             $extension = $file->getClientOriginalExtension();
-            
+
             $rows = SimpleExcelReader::create($file->getRealPath(), $extension)->getRows();
-            
+
             $count = 0;
-            $rows->each(function(array $rowProperties) use (&$count) {
-                if (!isset($rowProperties['staff_id']) || !isset($rowProperties['name']) || !isset($rowProperties['department'])) {
-                    throw new \Exception("Invalid formatting");
+            $rows->each(function (array $rowProperties) use (&$count) {
+                if (! isset($rowProperties['staff_id']) || ! isset($rowProperties['name']) || ! isset($rowProperties['department'])) {
+                    throw new \Exception('Invalid formatting');
                 }
-                
+
                 Staff::updateOrCreate(
                     ['staff_id' => $rowProperties['staff_id']],
                     [
                         'name' => $rowProperties['name'],
-                        'department' => $rowProperties['department']
+                        'department' => $rowProperties['department'],
                     ]
                 );
                 $count++;
@@ -52,7 +52,7 @@ class StaffController extends Controller
 
             return response()->json(['message' => "Successfully imported {$count} staffs."]);
         } catch (\Exception $e) {
-            return response()->json(['message' => "Import failed. Please make sure the format is correct."], 400);
+            return response()->json(['message' => 'Import failed. Please make sure the format is correct.'], 400);
         }
     }
 
@@ -70,12 +70,14 @@ class StaffController extends Controller
         ]);
 
         $staff = Staff::create($validated);
+
         return response()->json($staff, 201);
     }
 
     public function show($id)
     {
         $staff = Staff::findOrFail($id);
+
         return response()->json($staff);
     }
 
@@ -83,12 +85,13 @@ class StaffController extends Controller
     {
         $staff = Staff::findOrFail($id);
         $validated = $request->validate([
-            'staff_id' => 'required|string|unique:staff,staff_id,' . $staff->id,
+            'staff_id' => 'required|string|unique:staff,staff_id,'.$staff->id,
             'name' => 'required|string|max:255',
             'department' => 'required|string|max:255',
         ]);
 
         $staff->update($validated);
+
         return response()->json($staff);
     }
 
@@ -96,6 +99,7 @@ class StaffController extends Controller
     {
         $staff = Staff::findOrFail($id);
         $staff->delete();
+
         return response()->json(['message' => 'Staff deleted successfully']);
     }
 
@@ -108,6 +112,7 @@ class StaffController extends Controller
     {
         $staff = Staff::onlyTrashed()->findOrFail($id);
         $staff->restore();
+
         return response()->json(['message' => 'Staff restored successfully']);
     }
 }

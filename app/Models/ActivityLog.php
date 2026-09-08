@@ -50,7 +50,7 @@ class ActivityLog extends Model
      */
     public function getSubjectShortTypeAttribute(): ?string
     {
-        if (!$this->subject_type) {
+        if (! $this->subject_type) {
             return null;
         }
 

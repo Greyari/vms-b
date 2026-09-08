@@ -5,8 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\VisitorCard;
 use Illuminate\Http\Request;
-use Spatie\SimpleExcel\SimpleExcelWriter;
 use Spatie\SimpleExcel\SimpleExcelReader;
+use Spatie\SimpleExcel\SimpleExcelWriter;
 
 class CardController extends Controller
 {
@@ -16,7 +16,7 @@ class CardController extends Controller
             $writer = SimpleExcelWriter::streamDownload('card_template.xlsx');
             $writer->addRow([
                 'card_no' => 'CARD-001',
-                'status' => 'available' // available or in_use
+                'status' => 'available', // available or in_use
             ]);
         }, 'card_template.xlsx');
     }
@@ -24,24 +24,24 @@ class CardController extends Controller
     public function import(Request $request)
     {
         $request->validate([
-            'file' => 'required|file|mimes:xlsx,csv'
+            'file' => 'required|file|mimes:xlsx,csv',
         ]);
 
         try {
             $file = $request->file('file');
             $extension = $file->getClientOriginalExtension();
-            
+
             $rows = SimpleExcelReader::create($file->getRealPath(), $extension)->getRows();
-            
+
             $count = 0;
-            $rows->each(function(array $rowProperties) use (&$count) {
-                if (!array_key_exists('card_no', $rowProperties) || !array_key_exists('status', $rowProperties)) {
-                    throw new \Exception("Invalid formatting");
+            $rows->each(function (array $rowProperties) use (&$count) {
+                if (! array_key_exists('card_no', $rowProperties) || ! array_key_exists('status', $rowProperties)) {
+                    throw new \Exception('Invalid formatting');
                 }
-                $status = in_array(strtolower((string)$rowProperties['status']), ['available', 'in_use']) 
-                            ? strtolower((string)$rowProperties['status']) 
+                $status = in_array(strtolower((string) $rowProperties['status']), ['available', 'in_use'])
+                            ? strtolower((string) $rowProperties['status'])
                             : 'available';
-                            
+
                 VisitorCard::updateOrCreate(
                     ['card_no' => $rowProperties['card_no']],
                     ['status' => $status]
@@ -51,7 +51,7 @@ class CardController extends Controller
 
             return response()->json(['message' => "Successfully imported {$count} cards."]);
         } catch (\Exception $e) {
-            return response()->json(['message' => "Import failed. Please make sure the format is correct."], 400);
+            return response()->json(['message' => 'Import failed. Please make sure the format is correct.'], 400);
         }
     }
 
@@ -68,12 +68,14 @@ class CardController extends Controller
         ]);
 
         $card = VisitorCard::create($validated);
+
         return response()->json($card, 201);
     }
 
     public function show($id)
     {
         $card = VisitorCard::findOrFail($id);
+
         return response()->json($card);
     }
 
@@ -81,11 +83,12 @@ class CardController extends Controller
     {
         $card = VisitorCard::findOrFail($id);
         $validated = $request->validate([
-            'card_no' => 'required|string|unique:visitor_cards,card_no,' . $card->id,
+            'card_no' => 'required|string|unique:visitor_cards,card_no,'.$card->id,
             'status' => 'required|in:available,in_use',
         ]);
 
         $card->update($validated);
+
         return response()->json($card);
     }
 
@@ -93,6 +96,7 @@ class CardController extends Controller
     {
         $card = VisitorCard::findOrFail($id);
         $card->delete();
+
         return response()->json(['message' => 'Card deleted successfully']);
     }
 
@@ -105,6 +109,7 @@ class CardController extends Controller
     {
         $card = VisitorCard::onlyTrashed()->findOrFail($id);
         $card->restore();
+
         return response()->json(['message' => 'Card restored successfully']);
     }
 }

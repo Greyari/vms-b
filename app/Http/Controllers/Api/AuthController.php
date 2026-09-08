@@ -5,7 +5,6 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Services\ActivityLogger;
 use Illuminate\Http\Request;
-
 use Illuminate\Support\Facades\Auth;
 
 class AuthController extends Controller
@@ -17,12 +16,12 @@ class AuthController extends Controller
             'password' => 'required',
         ]);
 
-        if (!Auth::attempt($request->only('email', 'password'))) {
+        if (! Auth::attempt($request->only('email', 'password'))) {
             // Record failed attempts too (no causer, since nobody's authenticated yet).
             ActivityLogger::logEvent('login_failed', ['email' => $request->input('email')]);
 
             return response()->json([
-                'message' => 'Invalid credentials'
+                'message' => 'Invalid credentials',
             ], 401);
         }
 
@@ -39,7 +38,7 @@ class AuthController extends Controller
             'message' => 'Login success',
             'access_token' => $token,
             'token_type' => 'Bearer',
-            'user' => $user
+            'user' => $user,
         ]);
     }
 
@@ -58,7 +57,7 @@ class AuthController extends Controller
         $request->user()->currentAccessToken()->delete();
 
         return response()->json([
-            'message' => 'Logged out successfully'
+            'message' => 'Logged out successfully',
         ]);
     }
 }

@@ -21,7 +21,7 @@ trait LogsActivity
     {
         $defaults = ['password', 'remember_token', 'updated_at'];
 
-        $modelSpecific = (new static())->logExcept ?? [];
+        $modelSpecific = (new static)->logExcept ?? [];
 
         return array_unique([...$defaults, ...$modelSpecific]);
     }

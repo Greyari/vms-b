@@ -49,7 +49,7 @@ class ActivityLogController extends Controller
         }
 
         if ($request->filled('search')) {
-            $term = '%' . $request->input('search') . '%';
+            $term = '%'.$request->input('search').'%';
             $query->where(function ($q) use ($term) {
                 $q->where('causer_name', 'like', $term)
                     ->orWhere('causer_email', 'like', $term)

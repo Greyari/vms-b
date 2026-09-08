@@ -13,10 +13,10 @@ class ActivityLogger
     /**
      * Log a create/update/delete/restore event for an Eloquent model.
      *
-     * @param  string       $action     'created' | 'updated' | 'deleted' | 'restored'
-     * @param  Model        $subject    The model instance the action happened to
-     * @param  array|null   $old        Old attribute values (updates only)
-     * @param  array|null   $new        New attribute values
+     * @param  string  $action  'created' | 'updated' | 'deleted' | 'restored'
+     * @param  Model  $subject  The model instance the action happened to
+     * @param  array|null  $old  Old attribute values (updates only)
+     * @param  array|null  $new  New attribute values
      */
     public static function log(string $action, Model $subject, ?array $old = null, ?array $new = null): void
     {
@@ -80,7 +80,7 @@ class ActivityLogger
     protected static function labelFor(Model $subject): ?string
     {
         foreach (['name', 'full_name', 'plate_number', 'card_number', 'title', 'email'] as $field) {
-            if (!empty($subject->{$field})) {
+            if (! empty($subject->{$field})) {
                 return (string) $subject->{$field};
             }
         }

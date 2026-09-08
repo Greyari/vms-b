@@ -4,8 +4,11 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Visitor;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Spatie\SimpleExcel\SimpleExcelReader;
@@ -19,7 +22,7 @@ class VisitorController extends Controller
      * case-sensitive, so search goes through LOWER(...) with user wildcards
      * escaped.
      */
-    private function paginatedVisitors(Request $request, bool $blacklisted): \Illuminate\Contracts\Pagination\LengthAwarePaginator
+    private function paginatedVisitors(Request $request, bool $blacklisted): LengthAwarePaginator
     {
         $perPage = (int) $request->input('per_page', 15);
         $perPage = max(1, min($perPage, 100));
@@ -60,17 +63,17 @@ class VisitorController extends Controller
         $visitor = Visitor::findOrFail($id);
 
         $validated = $request->validate([
-            'id_type'    => 'required|in:ktp,sim,passport',
+            'id_type' => 'required|in:ktp,sim,passport',
             // M3 — identity is (id_type, id_number); enforce the composite
             // uniqueness in validation so a clash returns 422, not a DB 500.
-            'id_number'  => [
+            'id_number' => [
                 'required', 'string',
                 Rule::unique('visitors', 'id_number')
                     ->where(fn ($q) => $q->where('id_type', $request->input('id_type')))
                     ->ignore($id),
             ],
-            'name'       => 'required|string',
-            'company'    => 'nullable|string',
+            'name' => 'required|string',
+            'company' => 'nullable|string',
         ]);
 
         // M4 — block blacklist-evasion by renumbering: a blacklisted visitor
@@ -88,7 +91,7 @@ class VisitorController extends Controller
 
         return response()->json([
             'message' => 'Visitor updated successfully',
-            'visitor' => $visitor
+            'visitor' => $visitor,
         ]);
     }
 
@@ -103,13 +106,13 @@ class VisitorController extends Controller
         // mass-assigned visitor payload can never flip blacklist state — set
         // them explicitly here.
         $visitor->forceFill([
-            'is_blacklisted'   => true,
+            'is_blacklisted' => true,
             'blacklist_reason' => $validated['reason'],
         ])->save();
 
         return response()->json([
             'message' => 'Visitor blacklisted successfully',
-            'visitor' => $visitor
+            'visitor' => $visitor,
         ]);
     }
 
@@ -123,7 +126,7 @@ class VisitorController extends Controller
     {
         $visitor = Visitor::findOrFail($id);
         $visitor->forceFill([
-            'is_blacklisted'   => false,
+            'is_blacklisted' => false,
             'blacklist_reason' => null,
         ])->save();
 
@@ -157,10 +160,10 @@ class VisitorController extends Controller
             $writer = SimpleExcelWriter::streamDownload('visitors.xlsx');
             foreach ($visitors as $v) {
                 $writer->addRow([
-                    'ID Type'  => strtoupper($v->id_type),
+                    'ID Type' => strtoupper($v->id_type),
                     'ID Number' => $v->id_number,
-                    'Name'     => $v->name,
-                    'Company'  => $v->company ?? '-',
+                    'Name' => $v->name,
+                    'Company' => $v->company ?? '-',
                 ]);
             }
         }, 'visitors.xlsx');
@@ -171,10 +174,10 @@ class VisitorController extends Controller
         return response()->streamDownload(function () {
             $writer = SimpleExcelWriter::streamDownload('visitor_template.xlsx');
             $writer->addRow([
-                'ID Type'   => 'ktp',
+                'ID Type' => 'ktp',
                 'ID Number' => '1234567890123456',
-                'Name'      => 'John Doe',
-                'Company'   => 'PT Example',
+                'Name' => 'John Doe',
+                'Company' => 'PT Example',
             ]);
         }, 'visitor_template.xlsx');
     }
@@ -205,9 +208,9 @@ class VisitorController extends Controller
      * response) the moment the file exceeds it so a runaway upload can't be
      * processed inside one long transaction.
      *
-     * @return array<int, array<string, mixed>>|\Illuminate\Http\JsonResponse
+     * @return array<int, array<string, mixed>>|JsonResponse
      */
-    private function readImportRows(\Illuminate\Http\UploadedFile $file)
+    private function readImportRows(UploadedFile $file)
     {
         $maxRows = (int) config('vms.import_max_rows', 2000);
 
@@ -229,11 +232,14 @@ class VisitorController extends Controller
         $request->validate(['file' => 'required|file|mimes:xlsx,csv|max:5120']);
 
         $rows = $this->readImportRows($request->file('file'));
-        if ($rows instanceof \Illuminate\Http\JsonResponse) {
+        if ($rows instanceof JsonResponse) {
             return $rows;
         }
 
-        $created = 0; $updated = 0; $skipped = 0; $errors = [];
+        $created = 0;
+        $updated = 0;
+        $skipped = 0;
+        $errors = [];
 
         DB::transaction(function () use ($rows, &$created, &$updated, &$skipped, &$errors): void {
             foreach ($rows as $index => $row) {
@@ -243,6 +249,7 @@ class VisitorController extends Controller
                 if ($idNumber === '' || ! preg_match('/^[0-9A-Za-z-]+$/', $idNumber)) {
                     $skipped++;
                     $errors[] = "Row {$line}: missing or invalid ID Number (numeric-formatted ID cells are refused — format the ID column as Text and re-upload).";
+
                     continue;
                 }
 
@@ -250,6 +257,7 @@ class VisitorController extends Controller
                 if (! in_array($idType, ['ktp', 'sim', 'passport'], true)) {
                     $skipped++;
                     $errors[] = "Row {$line}: unknown ID Type '{$idType}' (expected ktp, sim or passport).";
+
                     continue;
                 }
 
@@ -257,6 +265,7 @@ class VisitorController extends Controller
                 if ($name === '') {
                     $skipped++;
                     $errors[] = "Row {$line}: missing Name.";
+
                     continue;
                 }
 
@@ -276,7 +285,7 @@ class VisitorController extends Controller
             'created' => $created,
             'updated' => $updated,
             'skipped' => $skipped,
-            'errors'  => array_slice($errors, 0, 20),
+            'errors' => array_slice($errors, 0, 20),
         ]);
     }
 
@@ -288,11 +297,11 @@ class VisitorController extends Controller
             $writer = SimpleExcelWriter::streamDownload('blacklisted_visitors.xlsx');
             foreach ($visitors as $visitor) {
                 $writer->addRow([
-                    'ID Type'   => strtoupper($visitor->id_type),
+                    'ID Type' => strtoupper($visitor->id_type),
                     'ID Number' => $visitor->id_number,
-                    'Name'      => $visitor->name,
-                    'Company'   => $visitor->company ?? '-',
-                    'Reason'    => $visitor->blacklist_reason ?? '-',
+                    'Name' => $visitor->name,
+                    'Company' => $visitor->company ?? '-',
+                    'Reason' => $visitor->blacklist_reason ?? '-',
                 ]);
             }
         }, 'blacklisted_visitors.xlsx');
@@ -303,11 +312,11 @@ class VisitorController extends Controller
         return response()->streamDownload(function () {
             $writer = SimpleExcelWriter::streamDownload('blacklist_template.xlsx');
             $writer->addRow([
-                'ID Type'   => 'ktp',
+                'ID Type' => 'ktp',
                 'ID Number' => '1234567890123456',
-                'Name'      => 'John Doe',
-                'Company'   => 'PT Example',
-                'Reason'    => 'Reason for blacklist',
+                'Name' => 'John Doe',
+                'Company' => 'PT Example',
+                'Reason' => 'Reason for blacklist',
             ]);
         }, 'blacklist_template.xlsx');
     }
@@ -317,11 +326,14 @@ class VisitorController extends Controller
         $request->validate(['file' => 'required|file|mimes:xlsx,csv|max:5120']);
 
         $rows = $this->readImportRows($request->file('file'));
-        if ($rows instanceof \Illuminate\Http\JsonResponse) {
+        if ($rows instanceof JsonResponse) {
             return $rows;
         }
 
-        $created = 0; $updated = 0; $skipped = 0; $errors = [];
+        $created = 0;
+        $updated = 0;
+        $skipped = 0;
+        $errors = [];
 
         DB::transaction(function () use ($rows, &$created, &$updated, &$skipped, &$errors): void {
             foreach ($rows as $index => $row) {
@@ -331,6 +343,7 @@ class VisitorController extends Controller
                 if ($idNumber === '' || ! preg_match('/^[0-9A-Za-z-]+$/', $idNumber)) {
                     $skipped++;
                     $errors[] = "Row {$line}: missing or invalid ID Number (numeric-formatted ID cells are refused — format the ID column as Text and re-upload).";
+
                     continue;
                 }
 
@@ -338,6 +351,7 @@ class VisitorController extends Controller
                 if (! in_array($idType, ['ktp', 'sim', 'passport'], true)) {
                     $skipped++;
                     $errors[] = "Row {$line}: unknown ID Type '{$idType}' (expected ktp, sim or passport).";
+
                     continue;
                 }
 
@@ -345,6 +359,7 @@ class VisitorController extends Controller
                 if ($name === '') {
                     $skipped++;
                     $errors[] = "Row {$line}: missing Name.";
+
                     continue;
                 }
 
@@ -352,6 +367,7 @@ class VisitorController extends Controller
                 if ($reason === '') {
                     $skipped++;
                     $errors[] = "Row {$line}: missing Reason.";
+
                     continue;
                 }
 
@@ -364,7 +380,7 @@ class VisitorController extends Controller
 
                 // is_blacklisted / blacklist_reason are guarded — set via forceFill.
                 $visitor->forceFill([
-                    'is_blacklisted'   => true,
+                    'is_blacklisted' => true,
                     'blacklist_reason' => $reason,
                 ])->save();
 
@@ -377,7 +393,7 @@ class VisitorController extends Controller
             'created' => $created,
             'updated' => $updated,
             'skipped' => $skipped,
-            'errors'  => array_slice($errors, 0, 20),
+            'errors' => array_slice($errors, 0, 20),
         ]);
     }
 }

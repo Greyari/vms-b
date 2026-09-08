@@ -3,10 +3,11 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\VehicleCard;
 use App\Models\Visit;
 use App\Models\Visitor;
 use App\Models\VisitorCard;
-use App\Models\VehicleCard;
+use Carbon\Carbon;
 
 class DashboardController extends Controller
 {
@@ -77,7 +78,7 @@ class DashboardController extends Controller
                     'ticket_number' => $visit->ticket_number,
                     'visitor_name' => $visit->visitor?->name ?? '-',
                     'staff_name' => $visit->staff?->name ?? '-',
-                    'time_in' => \Carbon\Carbon::parse($visit->time_in)->format('H:i'),
+                    'time_in' => Carbon::parse($visit->time_in)->format('H:i'),
                     'purpose' => $visit->purpose,
                 ];
             });

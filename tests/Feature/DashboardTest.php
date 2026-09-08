@@ -1,9 +1,9 @@
 <?php
 
 use App\Models\Staff;
+use App\Models\VehicleCard;
 use App\Models\Visit;
 use App\Models\Visitor;
-use App\Models\VehicleCard;
 use App\Models\VisitorCard;
 
 beforeEach(function () {

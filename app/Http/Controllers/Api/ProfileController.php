@@ -20,7 +20,7 @@ class ProfileController extends Controller
 
         $validated = $request->validate([
             'name' => 'required|string|max:255',
-            'email' => 'required|string|email|max:255|unique:users,email,' . $user->id,
+            'email' => 'required|string|email|max:255|unique:users,email,'.$user->id,
         ]);
 
         $user->name = $validated['name'];
@@ -29,7 +29,7 @@ class ProfileController extends Controller
 
         return response()->json([
             'message' => 'Profile updated successfully',
-            'user' => $user->load('roles')
+            'user' => $user->load('roles'),
         ]);
     }
 
@@ -42,9 +42,9 @@ class ProfileController extends Controller
             'password' => 'required|string|min:8|confirmed',
         ]);
 
-        if (!Hash::check($validated['current_password'], $user->password)) {
+        if (! Hash::check($validated['current_password'], $user->password)) {
             throw ValidationException::withMessages([
-                'current_password' => ['The provided password does not match your current password.']
+                'current_password' => ['The provided password does not match your current password.'],
             ]);
         }
 

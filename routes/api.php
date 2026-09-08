@@ -1,19 +1,18 @@
 <?php
 
 use App\Http\Controllers\Api\ActivityLogController;
+use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\CardController;
+use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\PermissionController;
+use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\RoleController;
+use App\Http\Controllers\Api\StaffController;
+use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\VehicleCardController;
+use App\Http\Controllers\Api\VisitController;
 use App\Http\Controllers\Api\VisitorController;
 use Illuminate\Support\Facades\Route;
-
-use App\Http\Controllers\Api\AuthController;
-use App\Http\Controllers\Api\VisitController;
-use App\Http\Controllers\Api\StaffController;
-use App\Http\Controllers\Api\CardController;
-use App\Http\Controllers\Api\UserController;
-use App\Http\Controllers\Api\ProfileController;
-use App\Http\Controllers\Api\DashboardController;
 
 Route::post('/login', [AuthController::class, 'login']);
 

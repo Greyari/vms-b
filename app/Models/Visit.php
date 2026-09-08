@@ -13,7 +13,7 @@ class Visit extends Model
 
     protected $fillable = [
         'visitor_id', 'staff_id', 'vehicle_card_id',
-        'purpose', 'date', 'time_in', 'time_out', 'vehicle_no', 'ticket_number'
+        'purpose', 'date', 'time_in', 'time_out', 'vehicle_no', 'ticket_number',
     ];
 
     public function visitor()

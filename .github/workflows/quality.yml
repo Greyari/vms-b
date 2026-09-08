@@ -1,0 +1,66 @@
+# Gerbang kualitas backend.
+#
+# Alasan berkas ini ada: pada 6 September 2026 `composer audit` dijalankan manual
+# di repo ini untuk pertama kalinya dan menemukan 43 advisory keamanan di 12
+# paket, termasuk satu severity high di symfony/http-kernel — semuanya sudah
+# ikut ter-deploy ke Azure dan melayani trafik. Tidak ada yang salah kerja;
+# memang tidak ada satu pun yang memeriksa.
+#
+# Urutannya dari pemeriksaan termurah ke termahal, supaya kesalahan sepele tidak
+# perlu menunggu suite penuh selesai.
+#
+# PHPStan sengaja BELUM ada di sini: larastan belum terpasang di repo ini, dan
+# memasangnya berarti sekalian membereskan temuan pertamanya — pekerjaan
+# tersendiri, bukan bagian dari memasang gerbang.
+
+name: Quality
+
+on:
+  push:
+    branches: [dev, production]
+  pull_request:
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Audit, Pint, tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          extensions: pdo_pgsql, pgsql, sqlite3, pdo_sqlite, mbstring, gd, bcmath, intl, zip
+          coverage: none
+
+      - name: Cache Composer
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/composer/files
+          key: composer-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-
+
+      - run: composer install --no-interaction --prefer-dist --no-progress
+
+      # Paling murah: hanya membaca composer.lock terhadap basis data advisory,
+      # tanpa mem-boot framework sama sekali.
+      - name: Audit dependencies
+        run: composer audit
+
+      - name: Format (Pint)
+        run: ./vendor/bin/pint --test
+
+      # Suite ini berjalan di SQLite in-memory (lihat phpunit.xml), sementara
+      # produksi memakai PostgreSQL 18. Itu perbedaan yang perlu disadari:
+      # perilaku khas Postgres — ilike, jsonb, timestamptz — tidak tercakup di
+      # sini. Menambahkan suite Integration ber-PostgreSQL adalah langkah
+      # berikutnya yang wajar, bukan sesuatu yang bisa dipura-pura sudah ada
+      # dengan memasang service database yang tidak dipakai suite mana pun.
+      - name: Unit + Feature
+        run: php artisan test

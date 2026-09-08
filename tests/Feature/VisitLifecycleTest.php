@@ -1,8 +1,8 @@
 <?php
 
 use App\Models\Staff;
-use App\Models\Visit;
 use App\Models\VehicleCard;
+use App\Models\Visit;
 use App\Models\VisitorCard;
 
 beforeEach(function () {
