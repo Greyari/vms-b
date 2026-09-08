@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\ActivityLogController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CardController;
 use App\Http\Controllers\Api\DashboardController;
+use App\Http\Controllers\Api\MailTestController;
 use App\Http\Controllers\Api\PermissionController;
 use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\RoleController;
@@ -106,4 +107,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/activity-logs', [ActivityLogController::class, 'index']);
         Route::get('/activity-logs/subject-types', [ActivityLogController::class, 'subjectTypes']);
     });
+
+    // --- Pemeriksaan SMTP -------------------------------------------------
+    // Mengirim SINKRON, bukan lewat antrean: sebuah uji yang mengantre menjawab
+    // 200 walaupun worker-nya mati dan tidak ada surat yang pernah terkirim.
+    Route::post('/admin/mail-test', MailTestController::class)
+        ->middleware(['permission:manage_users', 'throttle:5,1']);
 });
