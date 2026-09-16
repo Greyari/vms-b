@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Staff;
+use App\Models\VesselArrival;
 use App\Models\Visit;
 use App\Models\Visitor;
 use App\Models\VisitorCard;
@@ -143,4 +144,17 @@ it('deletes a visitor with no visit history', function () {
     $this->deleteJson("/api/visitors/{$visitor->id}")->assertOk();
 
     expect(Visitor::find($visitor->id))->toBeNull();
+});
+
+it('refuses to delete a visitor listed as crew on a vessel arrival', function () {
+    $arrival = VesselArrival::factory()->create();
+    $crew = Visitor::factory()->crew($arrival->vessel)->create();
+    $arrival->crew()->attach($crew->id);
+
+    $this->deleteJson("/api/visitors/{$crew->id}")
+        ->assertStatus(422)
+        ->assertJsonPath('message', 'Cannot delete this visitor because they are listed as crew on a vessel arrival. Blacklist them instead.');
+
+    expect(Visitor::find($crew->id))->not->toBeNull();
+    expect($arrival->crew()->count())->toBe(1);
 });

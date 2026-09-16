@@ -16,10 +16,13 @@ class RoleAndPermissionSeeder extends Seeder
     public function run(): void
     {
         $permissions = [
-            'view_visits', 'create_visits', 'export_visits', 'checkout_visits', 'delete_visits',
-            'view_visitors', 'manage_visitors', 'manage_blacklist',
+            'view_visits', 'create_visits', 'update_visits', 'export_visits', 'checkout_visits', 'delete_visits',
+            'view_visitors', 'create_visitors', 'manage_visitors', 'manage_blacklist',
             'view_staffs', 'manage_staffs',
             'view_cards', 'manage_cards',
+            'view_locations', 'manage_locations',
+            'view_vessel_arrivals', 'manage_vessel_arrivals',
+            'view_reports',
             'view_users', 'manage_users',
             'view_roles', 'manage_roles',
             'view_logs',
@@ -33,11 +36,26 @@ class RoleAndPermissionSeeder extends Seeder
         // Admin gets EVERYTHING (incl. the newly added permissions) — this prevents lockout.
         $adminRole->syncPermissions(Permission::all());
 
+        // VMS-old "user" accounts (StatusAdmin = 1, the gate posts): check-in,
+        // check-out, registering a new visitor, re-printing and editing a pass.
+        $securityPermissions = [
+            'view_visits', 'create_visits', 'checkout_visits', 'update_visits',
+            'view_visitors', 'create_visitors',
+            'view_staffs', 'view_cards', 'view_locations',
+        ];
+
         $securityRole = Role::firstOrCreate(['name' => 'security']);
-        $securityRole->syncPermissions([
-            'view_visits', 'create_visits', 'checkout_visits',
-            'view_staffs', 'view_cards', 'view_visitors',
-        ]);
+        $securityRole->syncPermissions($securityPermissions);
+
+        // VMS-old "admin" accounts (StatusAdmin = 0): everything at the gate plus
+        // master data, crew arrivals and reports — but no users, roles, activity
+        // log or visit deletion.
+        $supervisorRole = Role::firstOrCreate(['name' => 'supervisor']);
+        $supervisorRole->syncPermissions(array_merge($securityPermissions, [
+            'manage_visitors', 'manage_blacklist', 'manage_staffs', 'manage_cards', 'manage_locations',
+            'view_vessel_arrivals', 'manage_vessel_arrivals',
+            'view_reports', 'export_visits',
+        ]));
 
         // Akun awal HANYA dibuat kalau password-nya dipasok dari environment.
         //

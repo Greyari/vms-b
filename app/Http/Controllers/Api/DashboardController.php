@@ -18,7 +18,7 @@ class DashboardController extends Controller
 
         // Visit stats — one query, aggregated with conditional counts
         // (COUNT(*) FILTER works on PostgreSQL and sqlite >= 3.30).
-        $visitStats = Visit::selectRaw('COUNT(*) FILTER (WHERE time_out IS NULL) AS active_visits')
+        $visitStats = Visit::selectRaw('COUNT(*) FILTER (WHERE checked_out_at IS NULL) AS active_visits')
             ->selectRaw('COUNT(*) FILTER (WHERE date BETWEEN ? AND ?) AS month_visits', [$monthStart, $monthEnd])
             ->first();
         $activeVisits = (int) ($visitStats->active_visits ?? 0);
@@ -68,7 +68,7 @@ class DashboardController extends Controller
 
         // Recent visits
         $recentVisits = Visit::with(['visitor', 'staff'])
-            ->whereNull('time_out')
+            ->open()
             ->orderBy('created_at', 'desc')
             ->limit(5)
             ->get()

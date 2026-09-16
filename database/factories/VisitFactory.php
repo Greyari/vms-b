@@ -38,6 +38,13 @@ class VisitFactory extends Factory
 
     public function checkedOut(): static
     {
-        return $this->state(fn () => ['time_out' => Carbon::now()->toTimeString()]);
+        return $this->state(function () {
+            $checkedOutAt = Carbon::now();
+
+            return [
+                'time_out' => $checkedOutAt->toTimeString(),
+                'checked_out_at' => $checkedOutAt,
+            ];
+        });
     }
 }

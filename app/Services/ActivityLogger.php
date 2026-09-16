@@ -61,6 +61,7 @@ class ActivityLogger
             'causer_id' => $causer?->getKey(),
             'causer_name' => $causer?->name,
             'causer_email' => $causer?->email,
+            'causer_username' => $causer?->username,
             'action' => $action,
             'subject_type' => $subjectType,
             'subject_id' => $subjectId,

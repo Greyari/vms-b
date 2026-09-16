@@ -5,8 +5,10 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Services\ActivityLogger;
+use App\Support\Username;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rule;
 
 class UserController extends Controller
 {
@@ -19,25 +21,31 @@ class UserController extends Controller
 
     public function store(Request $request)
     {
+        // One spelling per username (App\Support\Username), so the unique rule
+        // compares the stored form.
+        if (is_string($request->input('username'))) {
+            $request->merge(['username' => Username::normalize($request->input('username'))]);
+        }
+
         $validated = $request->validate([
             'name' => 'required|string|max:255',
-            'email' => 'required|string|email|max:255|unique:users',
+            'username' => ['nullable', 'required_without:email', 'string', 'max:255', 'regex:/^[A-Za-z0-9._-]+$/', 'unique:users,username'],
+            'email' => ['nullable', 'required_without:username', 'string', 'email', 'max:255', 'unique:users,email'],
             'password' => 'required|string|min:8',
-            'roles' => 'nullable|array',
+            // The old fallback assigned a role named "user" that no seeder
+            // creates, so a request without roles crashed with a 500.
+            'roles' => 'required|array|min:1',
             'roles.*' => 'exists:roles,name',
         ]);
 
         $user = User::create([
             'name' => $validated['name'],
-            'email' => $validated['email'],
+            'username' => $validated['username'] ?? null,
+            'email' => $validated['email'] ?? null,
             'password' => Hash::make($validated['password']),
         ]);
 
-        if (! empty($validated['roles'])) {
-            $user->assignRole($validated['roles']);
-        } else {
-            $user->assignRole('user'); // Default fallback
-        }
+        $user->assignRole($validated['roles']);
 
         ActivityLogger::log(
             action: 'updated',
@@ -59,9 +67,15 @@ class UserController extends Controller
     public function update(Request $request, $id)
     {
         $user = User::findOrFail($id);
+
+        if (is_string($request->input('username'))) {
+            $request->merge(['username' => Username::normalize($request->input('username'))]);
+        }
+
         $validated = $request->validate([
             'name' => 'required|string|max:255',
-            'email' => 'required|string|email|max:255|unique:users,email,'.$user->id,
+            'username' => ['nullable', 'required_without:email', 'string', 'max:255', 'regex:/^[A-Za-z0-9._-]+$/', Rule::unique('users', 'username')->ignore($user->id)],
+            'email' => ['nullable', 'required_without:username', 'string', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
             'password' => 'nullable|string|min:8',
             'roles' => 'nullable|array',
             'roles.*' => 'exists:roles,name',
@@ -70,7 +84,13 @@ class UserController extends Controller
         $oldRoles = $user->roles()->pluck('name')->toArray();
 
         $user->name = $validated['name'];
-        $user->email = $validated['email'];
+        // Partial update: a field that was not sent keeps its value.
+        if (array_key_exists('username', $validated)) {
+            $user->username = $validated['username'];
+        }
+        if (array_key_exists('email', $validated)) {
+            $user->email = $validated['email'];
+        }
         if (! empty($validated['password'])) {
             $user->password = Hash::make($validated['password']);
         }

@@ -3,9 +3,13 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Resources\VisitorSummaryResource;
 use App\Models\Visitor;
+use App\Support\IdentityNumber;
+use App\Support\UniqueViolation;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
@@ -33,10 +37,13 @@ class VisitorController extends Controller
         $search = trim((string) $request->input('search', ''));
         if ($search !== '') {
             $escaped = '%'.strtolower(addcslashes($search, '%_\\')).'%';
-            $query->where(function (Builder $q) use ($escaped): void {
-                $q->whereRaw('LOWER(id_number) LIKE ?', [$escaped])
-                    ->orWhereRaw('LOWER(name) LIKE ?', [$escaped])
+            $idNumber = IdentityNumber::normalize($search);
+            $query->where(function (Builder $q) use ($escaped, $idNumber): void {
+                $q->whereRaw('LOWER(name) LIKE ?', [$escaped])
                     ->orWhereRaw('LOWER(company) LIKE ?', [$escaped]);
+                if ($idNumber !== '') {
+                    $q->orWhere('id_number', 'like', '%'.addcslashes($idNumber, '%_\\').'%');
+                }
             });
         }
 
@@ -50,7 +57,9 @@ class VisitorController extends Controller
             $dir = 'asc';
         }
 
-        return $query->orderBy($sort, $dir)->paginate($perPage);
+        return $query->orderBy($sort, $dir)
+            ->paginate($perPage)
+            ->through(fn (Visitor $visitor): array => (new VisitorSummaryResource($visitor))->resolve());
     }
 
     public function index(Request $request)
@@ -61,6 +70,10 @@ class VisitorController extends Controller
     public function update(Request $request, $id)
     {
         $visitor = Visitor::findOrFail($id);
+
+        if (is_string($request->input('id_number'))) {
+            $request->merge(['id_number' => IdentityNumber::normalize($request->input('id_number'))]);
+        }
 
         $validated = $request->validate([
             'id_type' => 'required|in:ktp,sim,passport',
@@ -78,10 +91,12 @@ class VisitorController extends Controller
 
         // M4 — block blacklist-evasion by renumbering: a blacklisted visitor
         // may not have their identity changed. They must be removed from the
-        // blacklist first (which is an auditable action).
+        // blacklist first (which is an auditable action). The stored number is
+        // normalized before comparing, so a row written before normalization
+        // does not read as a change when the same number is typed again.
         if ($visitor->is_blacklisted
             && ($validated['id_type'] !== $visitor->id_type
-                || $validated['id_number'] !== $visitor->id_number)) {
+                || $validated['id_number'] !== IdentityNumber::normalize($visitor->id_number))) {
             return response()->json([
                 'message' => 'This visitor is blacklisted — remove them from the blacklist before changing their identity.',
             ], 422);
@@ -91,7 +106,7 @@ class VisitorController extends Controller
 
         return response()->json([
             'message' => 'Visitor updated successfully',
-            'visitor' => $visitor,
+            'visitor' => (new VisitorSummaryResource($visitor))->resolve(),
         ]);
     }
 
@@ -112,7 +127,7 @@ class VisitorController extends Controller
 
         return response()->json([
             'message' => 'Visitor blacklisted successfully',
-            'visitor' => $visitor,
+            'visitor' => (new VisitorSummaryResource($visitor))->resolve(),
         ]);
     }
 
@@ -144,6 +159,15 @@ class VisitorController extends Controller
         if ($visitor->visits()->exists()) {
             return response()->json([
                 'message' => 'Cannot delete this visitor because they have visit history. Blacklist them instead.',
+            ], 422);
+        }
+
+        // vessel_arrival_crew.visitor_id is ON DELETE RESTRICT, so a crew member
+        // listed on a vessel arrival cannot be hard-deleted; without this check
+        // the delete fails with a QueryException and the client gets a 500.
+        if ($visitor->vesselArrivals()->exists()) {
+            return response()->json([
+                'message' => 'Cannot delete this visitor because they are listed as crew on a vessel arrival. Blacklist them instead.',
             ], 422);
         }
 
@@ -236,17 +260,17 @@ class VisitorController extends Controller
             return $rows;
         }
 
-        $created = 0;
-        $updated = 0;
-        $skipped = 0;
-        $errors = [];
+        return $this->runImportWithRetry(function () use ($rows): JsonResponse {
+            $created = 0;
+            $updated = 0;
+            $skipped = 0;
+            $errors = [];
 
-        DB::transaction(function () use ($rows, &$created, &$updated, &$skipped, &$errors): void {
             foreach ($rows as $index => $row) {
                 $line = $index + 2; // account for the header row
 
-                $idNumber = $this->normalizeIdNumber($row['ID Number'] ?? null);
-                if ($idNumber === '' || ! preg_match('/^[0-9A-Za-z-]+$/', $idNumber)) {
+                $idNumber = IdentityNumber::normalize($this->normalizeIdNumber($row['ID Number'] ?? null));
+                if ($idNumber === '' || ! preg_match('/^[0-9A-Z]+$/', $idNumber)) {
                     $skipped++;
                     $errors[] = "Row {$line}: missing or invalid ID Number (numeric-formatted ID cells are refused — format the ID column as Text and re-upload).";
 
@@ -278,15 +302,67 @@ class VisitorController extends Controller
 
                 $visitor->wasRecentlyCreated ? $created++ : $updated++;
             }
-        });
 
-        return response()->json([
-            'message' => "Import completed. {$created} created, {$updated} updated, {$skipped} skipped.",
-            'created' => $created,
-            'updated' => $updated,
-            'skipped' => $skipped,
-            'errors' => array_slice($errors, 0, 20),
-        ]);
+            return response()->json([
+                'message' => "Import completed. {$created} created, {$updated} updated, {$skipped} skipped.",
+                'created' => $created,
+                'updated' => $updated,
+                'skipped' => $skipped,
+                'errors' => array_slice($errors, 0, 20),
+            ]);
+        });
+    }
+
+    /**
+     * Runs one import attempt inside its own transaction, retrying — the
+     * whole attempt, transaction included — up to 3 times in total when it
+     * throws a UniqueConstraintViolationException that
+     * UniqueViolation::isRetryable() accepts: the attempt lost a visitor_no
+     * allocation race (see Visitor::nextVisitorNo()). The transaction has
+     * already rolled back everything the attempt wrote, so a retry recomputes
+     * cleanly. Any other unique violation ends the import at once, and every
+     * failure is reported to the log. Shared by import() and
+     * importBlacklist() so the retry loop exists in one place.
+     *
+     * $attempt must be self-contained: it (re-)initializes its own created/
+     * updated/skipped/errors counters on every call — a retried attempt never
+     * inherits state from the one that was just rolled back, so a lost race
+     * is never double-counted — and it returns the success JsonResponse
+     * itself, which is returned unchanged by DB::transaction() on a
+     * successful attempt.
+     *
+     * @param  callable(): JsonResponse  $attempt
+     */
+    private function runImportWithRetry(callable $attempt): JsonResponse
+    {
+        $maxAttempts = 3;
+
+        for ($i = 1; ; $i++) {
+            try {
+                return DB::transaction($attempt);
+            } catch (UniqueConstraintViolationException $e) {
+                // The exception carries SQL with the file's data: the client
+                // gets a fixed message and the log keeps the detail.
+                if (! UniqueViolation::isRetryable($e)) {
+                    report($e);
+
+                    return response()->json([
+                        'message' => 'Import failed',
+                        'error' => 'The file conflicts with an existing record.',
+                    ], 500);
+                }
+
+                if ($i >= $maxAttempts) {
+                    report($e);
+
+                    return response()->json([
+                        'message' => 'Import failed',
+                        'error' => 'Could not allocate a unique visitor number, please retry.',
+                    ], 500);
+                }
+                // loop again
+            }
+        }
     }
 
     public function exportBlacklist()
@@ -330,17 +406,17 @@ class VisitorController extends Controller
             return $rows;
         }
 
-        $created = 0;
-        $updated = 0;
-        $skipped = 0;
-        $errors = [];
+        return $this->runImportWithRetry(function () use ($rows): JsonResponse {
+            $created = 0;
+            $updated = 0;
+            $skipped = 0;
+            $errors = [];
 
-        DB::transaction(function () use ($rows, &$created, &$updated, &$skipped, &$errors): void {
             foreach ($rows as $index => $row) {
                 $line = $index + 2; // account for the header row
 
-                $idNumber = $this->normalizeIdNumber($row['ID Number'] ?? null);
-                if ($idNumber === '' || ! preg_match('/^[0-9A-Za-z-]+$/', $idNumber)) {
+                $idNumber = IdentityNumber::normalize($this->normalizeIdNumber($row['ID Number'] ?? null));
+                if ($idNumber === '' || ! preg_match('/^[0-9A-Z]+$/', $idNumber)) {
                     $skipped++;
                     $errors[] = "Row {$line}: missing or invalid ID Number (numeric-formatted ID cells are refused — format the ID column as Text and re-upload).";
 
@@ -386,14 +462,14 @@ class VisitorController extends Controller
 
                 $visitor->wasRecentlyCreated ? $created++ : $updated++;
             }
-        });
 
-        return response()->json([
-            'message' => "Import completed. {$created} created, {$updated} updated, {$skipped} skipped.",
-            'created' => $created,
-            'updated' => $updated,
-            'skipped' => $skipped,
-            'errors' => array_slice($errors, 0, 20),
-        ]);
+            return response()->json([
+                'message' => "Import completed. {$created} created, {$updated} updated, {$skipped} skipped.",
+                'created' => $created,
+                'updated' => $updated,
+                'skipped' => $skipped,
+                'errors' => array_slice($errors, 0, 20),
+            ]);
+        });
     }
 }

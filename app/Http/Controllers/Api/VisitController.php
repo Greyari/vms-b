@@ -3,13 +3,16 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Resources\VisitorSummaryResource;
+use App\Http\Resources\VisitResource;
 use App\Models\VehicleCard;
 use App\Models\Visit;
 use App\Models\Visitor;
 use App\Models\VisitorCard;
-use App\Services\MasterDataClient;
+use App\Support\IdentityNumber;
+use App\Support\TicketNumber;
+use App\Support\UniqueViolation;
 use Barryvdh\DomPDF\Facade\Pdf;
-use Carbon\Carbon;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
@@ -18,73 +21,49 @@ use Spatie\SimpleExcel\SimpleExcelWriter;
 
 class VisitController extends Controller
 {
-    public function checkKtp($ktp, MasterDataClient $master)
+    public function checkKtp($ktp)
     {
-        $visitor = Visitor::where('id_number', $ktp)->first();
+        // VMS owns its visitor registry: a visitor is known here or not at all.
+        $visitor = Visitor::where('id_number', IdentityNumber::normalize($ktp))->first();
 
-        if ($visitor !== null || ! $master->enabled()) {
-            return response()->json($visitor);
-        }
-
-        // Not known locally — ask Master Data (crew/employee registry), so
-        // returning crew/staff auto-fill on their first VMS visit too.
-        try {
-            $person = $master->lookupPerson('ktp', $ktp)
-                ?? $master->lookupPerson('passport', $ktp);
-        } catch (\Throwable $e) {
-            report($e);
-            $person = null; // auto-fill is convenience — never block the form
-        }
-
-        if ($person === null) {
-            return response()->json(null);
-        }
-
-        // Visitor-shaped payload so the existing form auto-fill just works.
-        return response()->json([
-            'source' => 'master',
-            'id_number' => $ktp,
-            'name' => $person['fullName'] ?? null,
-            'company' => null,
-            'is_blacklisted' => (bool) ($person['isBlacklisted'] ?? false),
-            'blacklist_reason' => $person['blacklistReason'] ?? null,
-        ]);
+        return response()->json($visitor === null ? null : (new VisitorSummaryResource($visitor))->resolve());
     }
 
     public function searchVisitor(Request $request)
     {
-        $q = $request->query('q');
-        if (! $q) {
+        $q = trim((string) $request->query('q', ''));
+        if ($q === '') {
             return response()->json([]);
         }
 
-        // Postgres LIKE is case-sensitive — search through LOWER(...) with the
-        // user's wildcards escaped. Full models are returned (nothing hidden),
-        // so is_blacklisted / blacklist_reason are included for the caller.
-        $escaped = '%'.strtolower(addcslashes($q, '%_\\')).'%';
+        // Postgres LIKE is case-sensitive — names go through LOWER(...) with the
+        // user's wildcards escaped. id_number is stored normalized (upper case,
+        // no spaces or dashes), so the term is normalized the same way before
+        // matching. VisitorSummaryResource keeps is_blacklisted and
+        // blacklist_reason for the caller and leaves the rest of the profile out.
+        $escapedName = '%'.strtolower(addcslashes($q, '%_\\')).'%';
+        $idNumber = IdentityNumber::normalize($q);
 
-        $visitors = Visitor::whereRaw('LOWER(id_number) LIKE ?', [$escaped])
-            ->orWhereRaw('LOWER(name) LIKE ?', [$escaped])
+        $visitors = Visitor::where(function ($query) use ($escapedName, $idNumber): void {
+            $query->whereRaw('LOWER(name) LIKE ?', [$escapedName]);
+            if ($idNumber !== '') {
+                $query->orWhere('id_number', 'like', '%'.addcslashes($idNumber, '%_\\').'%');
+            }
+        })
             ->limit(10)
             ->get();
 
-        return response()->json($visitors);
+        return response()->json(VisitorSummaryResource::collection($visitors)->resolve());
     }
 
     public function activeVisits()
     {
-        $visits = Visit::with(['visitor', 'staff', 'visitorCards', 'vehicleCard'])
-            ->whereNull('time_out')
+        $visits = Visit::with(['visitor', 'staff', 'location', 'visitorCards', 'vehicleCard'])
+            ->open()
             ->orderBy('created_at', 'desc')
             ->get();
 
-        $visits->transform(function ($visit) {
-            $visit->time_in = Carbon::parse($visit->time_in)->format('H:i');
-
-            return $visit;
-        });
-
-        return response()->json($visits);
+        return response()->json(VisitResource::collection($visits)->resolve());
     }
 
     public function history(Request $request)
@@ -92,25 +71,27 @@ class VisitController extends Controller
         $perPage = (int) $request->input('per_page', 50);
         $perPage = max(1, min($perPage, 200));
 
-        $query = Visit::with(['visitor', 'staff', 'visitorCards', 'vehicleCard'])->orderBy('created_at', 'desc');
+        $query = Visit::with(['visitor', 'staff', 'location', 'visitorCards', 'vehicleCard'])->orderBy('created_at', 'desc');
 
         if ($request->has('start_date') && $request->has('end_date') &&
             $request->start_date !== '' && $request->end_date !== '') {
             $query->whereBetween('date', [$request->start_date, $request->end_date]);
         }
 
-        // ->through() applies the H:i transform while preserving paginator meta.
-        $paginated = $query->paginate($perPage)->through(function ($visit) {
-            $visit->time_in = Carbon::parse($visit->time_in)->format('H:i');
-
-            return $visit;
-        });
-
-        return response()->json($paginated);
+        // ->through() shapes each visit while preserving the paginator meta.
+        return response()->json(
+            $query->paginate($perPage)->through(fn (Visit $visit): array => (new VisitResource($visit))->resolve())
+        );
     }
 
-    public function store(Request $request, MasterDataClient $master)
+    public function store(Request $request)
     {
+        // One spelling per identity document: validate, look up and store the
+        // normalized number (see App\Support\IdentityNumber).
+        if (is_string($request->input('id_number'))) {
+            $request->merge(['id_number' => IdentityNumber::normalize($request->input('id_number'))]);
+        }
+
         $validated = $request->validate([
             'id_type' => 'required|in:ktp,sim,passport',
             'id_number' => 'required|string',
@@ -124,17 +105,15 @@ class VisitController extends Controller
             'vehicle_no' => 'nullable|string',
         ]);
 
-        // Read-only blacklist gates run BEFORE the transaction. The Master Data
-        // lookup is a 2-5s network call; holding an open DB transaction across
-        // it pins a pooled connection and would re-issue the call on every
-        // ticket-number retry below. Rejecting here also avoids opening a
-        // transaction at all for a blocked visitor. The identity lookup is a
+        // The blacklist gate runs BEFORE the transaction: rejecting here avoids
+        // opening one at all for a blocked visitor, and avoids re-running the
+        // check on every ticket-number retry below. The identity lookup is a
         // read (->first(), never a write), so nothing is persisted if we reject.
         $existingVisitor = Visitor::where('id_type', $validated['id_type'])
             ->where('id_number', $validated['id_number'])
             ->first();
 
-        // Local blacklist. A freshly firstOrCreate'd visitor (inside the
+        // A freshly firstOrCreate'd visitor (inside the
         // transaction) can never be blacklisted — is_blacklisted is not fillable
         // and defaults false — so this pre-check is the only local gate needed.
         if ($existingVisitor && $existingVisitor->is_blacklisted) {
@@ -144,36 +123,12 @@ class VisitController extends Controller
             ], 422);
         }
 
-        // Central blacklist gate (Master Data) — additive to the local check.
-        // Fail-open on connectivity unless strict mode is set, so master
-        // downtime never halts the gate house.
-        if ($master->enabled() && in_array($validated['id_type'], ['ktp', 'passport'], true)) {
-            try {
-                $person = $master->lookupPerson($validated['id_type'], $validated['id_number']);
-
-                if ($person !== null && ($person['isBlacklisted'] ?? false)) {
-                    return response()->json([
-                        'message' => 'This visitor is blacklisted in Master Data and cannot be registered.',
-                        'reason' => $person['blacklistReason'] ?? null,
-                    ], 422);
-                }
-            } catch (\Throwable $e) {
-                report($e);
-
-                if (config('services.master_data.strict')) {
-                    return response()->json([
-                        'message' => 'Master Data blacklist check is unavailable — registration blocked (strict mode).',
-                    ], 503);
-                }
-            }
-        }
-
-        // The write path runs in a transaction. The ticket number is derived
-        // under a row lock (B8b); if two concurrent gate-house sessions still
-        // race to the same number, the unique(ticket_number) constraint (B10)
-        // rejects the loser — we retry with a recomputed number up to 3x. Guard
-        // failures throw an HttpResponseException so the transaction rolls back
-        // cleanly and the intended 4xx body is returned.
+        // The write path runs in a transaction, which SequenceLock needs: the
+        // ticket number and a new visitor's visitor_no are allocated under a
+        // PostgreSQL advisory lock held until commit. The unique indexes stay
+        // the backstop — a violation UniqueViolation calls retryable gets up to
+        // 3 attempts. Guard failures throw an HttpResponseException so the
+        // transaction rolls back cleanly and the intended 4xx body is returned.
         $maxAttempts = 3;
 
         for ($attempt = 1; ; $attempt++) {
@@ -191,7 +146,7 @@ class VisitController extends Controller
                     );
 
                     // Block if visitor already has an active visit
-                    $hasActiveVisit = Visit::where('visitor_id', $visitor->id)->whereNull('time_out')->exists();
+                    $hasActiveVisit = Visit::where('visitor_id', $visitor->id)->open()->exists();
                     if ($hasActiveVisit) {
                         throw new HttpResponseException(response()->json([
                             'message' => 'This visitor is already checked in and currently has an active visit.',
@@ -217,29 +172,8 @@ class VisitController extends Controller
                         }
                     }
 
-                    // Auto-Numbering Logic: YY/MM/XXXXX, year-scoped continuation.
-                    // lockForUpdate serializes concurrent number derivation.
-                    $year = now()->format('y');
-                    $month = now()->format('m');
-                    $prefix = "{$year}/{$month}/";
-
-                    // Order by the ticket value itself — fixed-width YY/MM/NNNNN
-                    // sorts numerically as a string within the year scope — so a
-                    // same-second insert still yields the true maximum, not an
-                    // ambiguous created_at tie that could recompute a duplicate.
-                    $latestVisit = Visit::where('ticket_number', 'like', "{$year}/%")
-                        ->orderByDesc('ticket_number')
-                        ->lockForUpdate()
-                        ->first();
-
-                    if ($latestVisit && $latestVisit->ticket_number) {
-                        $parts = explode('/', $latestVisit->ticket_number);
-                        $newNumber = (int) end($parts) + 1;
-                    } else {
-                        $newNumber = 1;
-                    }
-
-                    $ticketNumber = $prefix.str_pad((string) $newNumber, 5, '0', STR_PAD_LEFT);
+                    // YY/MM/NNNNN, counted per month, allocated under SequenceLock.
+                    $ticketNumber = TicketNumber::next();
 
                     $visit = Visit::create([
                         'visitor_id' => $visitor->id,
@@ -263,38 +197,56 @@ class VisitController extends Controller
                     return $visit;
                 });
 
-                $visit->load(['visitor', 'staff', 'visitorCards', 'vehicleCard']);
-                $visit->time_in = Carbon::parse($visit->time_in)->format('H:i');
+                $visit->load(['visitor', 'staff', 'location', 'visitorCards', 'vehicleCard']);
 
                 return response()->json([
                     'message' => 'Visit recorded successfully',
-                    'visit' => $visit,
+                    'visit' => (new VisitResource($visit))->resolve(),
                 ], 201);
 
             } catch (HttpResponseException $e) {
                 // A guard rejected the registration — return its response.
                 return $e->getResponse();
             } catch (UniqueConstraintViolationException $e) {
-                // Ticket-number collision under concurrency — recompute + retry.
-                if ($attempt >= $maxAttempts) {
+                // Only a lost numbering race is resolved by another attempt
+                // (firstOrCreate already settles two registrations of the same
+                // person); anything else would fail the same way again. The
+                // exception carries SQL with the visitor's data, so the client
+                // gets a fixed message and the log keeps the detail.
+                if (! UniqueViolation::isRetryable($e)) {
+                    report($e);
+
                     return response()->json([
                         'message' => 'Failed to record visit',
-                        'error' => 'Could not allocate a unique ticket number, please retry.',
+                        'error' => 'The visit conflicts with an existing record.',
+                    ], 500);
+                }
+
+                if ($attempt >= $maxAttempts) {
+                    report($e);
+
+                    return response()->json([
+                        'message' => 'Failed to record visit',
+                        'error' => 'Could not allocate a unique number, please retry.',
                     ], 500);
                 }
                 // loop again
             } catch (\Throwable $e) {
-                return response()->json(['message' => 'Failed to record visit', 'error' => $e->getMessage()], 500);
+                report($e);
+
+                return response()->json([
+                    'message' => 'Failed to record visit',
+                    'error' => 'An unexpected error stopped the visit from being recorded.',
+                ], 500);
             }
         }
     }
 
     public function print($id)
     {
-        $visit = Visit::with(['visitor', 'staff', 'visitorCards', 'vehicleCard'])->findOrFail($id);
-        $visit->time_in = Carbon::parse($visit->time_in)->format('H:i');
+        $visit = Visit::with(['visitor', 'staff', 'location', 'visitorCards', 'vehicleCard'])->findOrFail($id);
 
-        return response()->json($visit);
+        return response()->json((new VisitResource($visit))->resolve());
     }
 
     public function checkout($id)
@@ -303,7 +255,7 @@ class VisitController extends Controller
             DB::beginTransaction();
 
             $visit = Visit::findOrFail($id);
-            if ($visit->time_out !== null) {
+            if ($visit->checked_out_at !== null) {
                 // Guard fires after DB::beginTransaction() — roll back the open
                 // transaction before returning, otherwise it leaks (holding
                 // locks in prod; corrupting the next request's transaction
@@ -313,7 +265,13 @@ class VisitController extends Controller
                 return response()->json(['message' => 'Visitor already checked out'], 422);
             }
 
-            $visit->update(['time_out' => now()->toTimeString()]);
+            // checked_out_at carries the date (multi-day visits); time_out stays
+            // for readers that still expect a clock time.
+            $checkedOutAt = now();
+            $visit->update([
+                'checked_out_at' => $checkedOutAt,
+                'time_out' => $checkedOutAt->toTimeString(),
+            ]);
 
             // Revert visitor cards status
             $cardIds = $visit->visitorCards->pluck('id')->toArray();
@@ -328,9 +286,11 @@ class VisitController extends Controller
 
             DB::commit();
 
+            $visit->load(['visitor', 'staff', 'location', 'visitorCards', 'vehicleCard']);
+
             return response()->json([
                 'message' => 'Checkout successful',
-                'visit' => $visit,
+                'visit' => (new VisitResource($visit))->resolve(),
             ]);
 
         } catch (\Exception $e) {
@@ -348,7 +308,7 @@ class VisitController extends Controller
             $visit = Visit::findOrFail($id);
 
             // Revert card status if not yet checked out
-            if ($visit->time_out === null) {
+            if ($visit->checked_out_at === null) {
                 $cardIds = $visit->visitorCards->pluck('id')->toArray();
                 if (! empty($cardIds)) {
                     VisitorCard::whereIn('id', $cardIds)->update(['status' => 'available']);
@@ -365,8 +325,13 @@ class VisitController extends Controller
             return response()->json(['message' => 'Visit deleted successfully']);
         } catch (\Exception $e) {
             DB::rollBack();
+            // The exception can carry SQL with visit data: log it, answer generically.
+            report($e);
 
-            return response()->json(['message' => 'Failed to delete visit', 'error' => $e->getMessage()], 500);
+            return response()->json([
+                'message' => 'Failed to delete visit',
+                'error' => 'An unexpected error stopped the visit from being deleted.',
+            ], 500);
         }
     }
 

@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\ActivityLogController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CardController;
 use App\Http\Controllers\Api\DashboardController;
+use App\Http\Controllers\Api\HealthDbController;
 use App\Http\Controllers\Api\MailTestController;
 use App\Http\Controllers\Api\PermissionController;
 use App\Http\Controllers\Api\ProfileController;
@@ -15,7 +16,11 @@ use App\Http\Controllers\Api\VisitController;
 use App\Http\Controllers\Api\VisitorController;
 use Illuminate\Support\Facades\Route;
 
-Route::post('/login', [AuthController::class, 'login']);
+Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:login');
+// No throttle: production caches in the database (CACHE_STORE=database), so a
+// rate limiter here would turn "database down" into a 500 before this probe
+// could answer 503.
+Route::get('/health-db', HealthDbController::class);
 
 Route::middleware('auth:sanctum')->group(function () {
     // Auth-only (no permission required) — identity, session, self-service profile.

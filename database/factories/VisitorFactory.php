@@ -2,6 +2,8 @@
 
 namespace Database\Factories;
 
+use App\Enums\VisitorType;
+use App\Models\Location;
 use App\Models\Visitor;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
@@ -29,6 +31,14 @@ class VisitorFactory extends Factory
         return $this->state(fn () => [
             'is_blacklisted' => true,
             'blacklist_reason' => $reason,
+        ]);
+    }
+
+    public function crew(?Location $vessel = null): static
+    {
+        return $this->state(fn () => [
+            'visitor_type' => VisitorType::Crew->value,
+            'vessel_id' => $vessel?->id ?? Location::factory(),
         ]);
     }
 }

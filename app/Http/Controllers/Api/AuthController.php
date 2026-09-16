@@ -3,7 +3,9 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\User;
 use App\Services\ActivityLogger;
+use App\Support\Username;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
@@ -11,14 +13,29 @@ class AuthController extends Controller
 {
     public function login(Request $request)
     {
+        // Gate-post accounts carried over from VMS-old sign in with an Employee
+        // ID and have no email, so one field takes either. The old `email`
+        // field is still accepted.
         $request->validate([
-            'email' => 'required|email',
-            'password' => 'required',
+            'login' => 'nullable|required_without:email|string|max:255',
+            'email' => 'nullable|required_without:login|string|max:255',
+            'password' => 'required|string',
         ]);
 
-        if (! Auth::attempt($request->only('email', 'password'))) {
+        $login = trim((string) ($request->input('login') ?? $request->input('email')));
+        $field = str_contains($login, '@') ? 'email' : 'username';
+        if ($field === 'username') {
+            // Stored upper-cased: an Employee ID typed in lower case still signs in.
+            $login = (string) Username::normalize($login);
+        }
+
+        if (! Auth::attempt([$field => $login, 'password' => $request->input('password')])) {
             // Record failed attempts too (no causer, since nobody's authenticated yet).
-            ActivityLogger::logEvent('login_failed', ['email' => $request->input('email')]);
+            // Name the account only when it exists: people type their password
+            // into the login field by mistake, and the activity log must never
+            // keep that text.
+            $knownAccount = User::where($field, $login)->exists();
+            ActivityLogger::logEvent('login_failed', ['login' => $knownAccount ? $login : null]);
 
             return response()->json([
                 'message' => 'Invalid credentials',

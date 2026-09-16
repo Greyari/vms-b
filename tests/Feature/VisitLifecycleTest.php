@@ -4,6 +4,7 @@ use App\Models\Staff;
 use App\Models\VehicleCard;
 use App\Models\Visit;
 use App\Models\VisitorCard;
+use Illuminate\Support\Facades\Exceptions;
 
 beforeEach(function () {
     actingAsAdmin();
@@ -64,4 +65,29 @@ it('deleting an active visit frees its cards', function () {
     expect(Visit::find($id))->toBeNull();
     expect($card->fresh()->status)->toBe('available');
     expect($vehicle->fresh()->status)->toBe('available');
+});
+
+it('hides an unexpected delete error from the client and reports it', function () {
+    ['id' => $id, 'card' => $card] = createActiveVisit('3210000000000903');
+    Exceptions::fake();
+
+    Visit::deleting(function (): void {
+        throw new RuntimeException('PRIVATE-SQL-DETAIL');
+    });
+
+    try {
+        $this->deleteJson("/api/visits/{$id}")
+            ->assertStatus(500)
+            ->assertExactJson([
+                'message' => 'Failed to delete visit',
+                'error' => 'An unexpected error stopped the visit from being deleted.',
+            ]);
+
+        expect(Visit::find($id))->not->toBeNull();
+        expect($card->fresh()->status)->toBe('in_use');
+        Exceptions::assertReported(fn (RuntimeException $e): bool => $e->getMessage() === 'PRIVATE-SQL-DETAIL');
+    } finally {
+        Visit::flushEventListeners();
+        Visit::clearBootedModels();
+    }
 });

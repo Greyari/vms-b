@@ -19,6 +19,7 @@ class ActivityLog extends Model
         'causer_id',
         'causer_name',
         'causer_email',
+        'causer_username',
         'action',
         'subject_type',
         'subject_id',

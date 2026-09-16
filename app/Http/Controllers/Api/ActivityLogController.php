@@ -15,12 +15,12 @@ class ActivityLogController extends Controller
      *   ?subject_type=Staff   short class name, e.g. Staff, Visitor, Visit, VehicleCard, VisitorCard, User, Role
      *   ?subject_id=...       a specific record
      *   ?from=2026-08-01&to=2026-08-31
-     *   ?search=budi          matches causer name/email or subject label
+     *   ?search=budi          matches causer name/email/username or subject label
      *   ?per_page=25
      */
     public function index(Request $request)
     {
-        $query = ActivityLog::query()->with('causer:id,name,email')->latest('created_at');
+        $query = ActivityLog::query()->with('causer:id,name,email,username')->latest('created_at');
 
         if ($request->filled('causer_id')) {
             $query->where('causer_id', $request->input('causer_id'));
@@ -53,6 +53,7 @@ class ActivityLogController extends Controller
             $query->where(function ($q) use ($term) {
                 $q->where('causer_name', 'like', $term)
                     ->orWhere('causer_email', 'like', $term)
+                    ->orWhere('causer_username', 'like', $term)
                     ->orWhere('subject_label', 'like', $term);
             });
         }
@@ -65,6 +66,7 @@ class ActivityLogController extends Controller
                 'causer_id' => $log->causer_id,
                 'causer_name' => $log->causer_name,
                 'causer_email' => $log->causer_email,
+                'causer_username' => $log->causer_username,
                 'action' => $log->action,
                 'subject_type' => $log->subject_short_type,
                 'subject_id' => $log->subject_id,

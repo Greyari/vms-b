@@ -1,7 +1,12 @@
 <?php
 
 use App\Models\Visitor;
+use App\Models\VisitorCard;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Exceptions;
+use Illuminate\Support\Str;
 use Spatie\SimpleExcel\SimpleExcelWriter;
 
 beforeEach(function () {
@@ -119,4 +124,163 @@ it('imports a blacklist file, flagging visitors and creating unknown ones', func
     expect($visitor)->not->toBeNull();
     expect($visitor->is_blacklisted)->toBeTrue();
     expect($visitor->blacklist_reason)->toBe('Fraud');
+});
+
+it('normalizes id numbers from a spreadsheet import', function () {
+    $file = makeXlsxUpload([
+        ['ID Type' => 'ktp', 'ID Number' => '6210-0000 0000-0001', 'Name' => 'Dashed Import', 'Company' => ''],
+    ]);
+
+    $this->post('/api/visitors/import', ['file' => $file])->assertOk();
+
+    expect(Visitor::where('id_number', '6210000000000001')->exists())->toBeTrue();
+});
+
+/** @return array<string, mixed> */
+function decoyVisitorRow(Visitor $visitor): array
+{
+    return [
+        'id' => (string) Str::uuid7(),
+        'id_type' => 'ktp',
+        'id_number' => 'RACEDECOY'.$visitor->visitor_no,
+        'name' => 'Race Decoy',
+        'visitor_no' => $visitor->visitor_no,
+        'is_blacklisted' => false,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ];
+}
+
+it('retries a visitor import that loses a visitor_no race once, without double counting', function () {
+    $triggered = false;
+    raceVisitorNoOnCreating(function (Visitor $visitor) use (&$triggered): void {
+        if ($triggered) {
+            return;
+        }
+        $triggered = true;
+        DB::table('visitors')->insert(decoyVisitorRow($visitor));
+    });
+
+    try {
+        $file = makeXlsxUpload([
+            ['ID Type' => 'ktp', 'ID Number' => '6210000000000301', 'Name' => 'Race Import One', 'Company' => 'PT A'],
+            ['ID Type' => 'ktp', 'ID Number' => '6210000000000302', 'Name' => 'Race Import Two', 'Company' => 'PT B'],
+        ]);
+
+        $response = $this->post('/api/visitors/import', ['file' => $file]);
+
+        $response->assertOk();
+        expect($response->json('created'))->toBe(2);
+        expect($response->json('updated'))->toBe(0);
+        expect($response->json('skipped'))->toBe(0);
+        expect(Visitor::where('id_number', '6210000000000301')->exists())->toBeTrue();
+        expect(Visitor::where('id_number', '6210000000000302')->exists())->toBeTrue();
+        // The decoy only ever lived inside the rolled-back first attempt.
+        expect(Visitor::where('name', 'Race Decoy')->exists())->toBeFalse();
+    } finally {
+        Visitor::flushEventListeners();
+        Visitor::clearBootedModels();
+    }
+});
+
+it('retries a blacklist import that loses a visitor_no race once, without double counting', function () {
+    $triggered = false;
+    raceVisitorNoOnCreating(function (Visitor $visitor) use (&$triggered): void {
+        if ($triggered) {
+            return;
+        }
+        $triggered = true;
+        DB::table('visitors')->insert(decoyVisitorRow($visitor));
+    });
+
+    try {
+        $file = makeXlsxUpload([
+            ['ID Type' => 'ktp', 'ID Number' => '8210000000000301', 'Name' => 'Race Blacklist One', 'Company' => '', 'Reason' => 'Fraud'],
+            ['ID Type' => 'ktp', 'ID Number' => '8210000000000302', 'Name' => 'Race Blacklist Two', 'Company' => '', 'Reason' => 'Theft'],
+        ]);
+
+        $response = $this->post('/api/visitors/blacklisted/import', ['file' => $file]);
+
+        $response->assertOk();
+        expect($response->json('created'))->toBe(2);
+        expect($response->json('updated'))->toBe(0);
+        expect($response->json('skipped'))->toBe(0);
+
+        $one = Visitor::where('id_number', '8210000000000301')->first();
+        $two = Visitor::where('id_number', '8210000000000302')->first();
+        expect($one)->not->toBeNull();
+        expect($one->is_blacklisted)->toBeTrue();
+        expect($two)->not->toBeNull();
+        expect($two->is_blacklisted)->toBeTrue();
+        expect(Visitor::where('name', 'Race Decoy')->exists())->toBeFalse();
+    } finally {
+        Visitor::flushEventListeners();
+        Visitor::clearBootedModels();
+    }
+});
+
+it('gives up after 3 attempts with 500 and persists nothing from the file', function () {
+    Exceptions::fake();
+    // Unconditional: every attempt (up to the retry cap) loses the race.
+    raceVisitorNoOnCreating(function (Visitor $visitor): void {
+        DB::table('visitors')->insert(decoyVisitorRow($visitor));
+    });
+
+    try {
+        $file = makeXlsxUpload([
+            ['ID Type' => 'ktp', 'ID Number' => '6210000000000401', 'Name' => 'Never Persisted', 'Company' => ''],
+        ]);
+
+        $response = $this->post('/api/visitors/import', ['file' => $file]);
+
+        $response->assertStatus(500);
+        $response->assertExactJson([
+            'message' => 'Import failed',
+            'error' => 'Could not allocate a unique visitor number, please retry.',
+        ]);
+
+        expect(Visitor::where('id_number', '6210000000000401')->exists())->toBeFalse();
+        expect(Visitor::count())->toBe(0);
+        Exceptions::assertReported(UniqueConstraintViolationException::class);
+    } finally {
+        Visitor::flushEventListeners();
+        Visitor::clearBootedModels();
+    }
+});
+
+it('does not retry an import that fails on an unrelated unique index and reports it', function () {
+    Exceptions::fake();
+    VisitorCard::factory()->create(['card_no' => 'IMPORT-CLASH']);
+    $attempts = 0;
+
+    raceVisitorNoOnCreating(function () use (&$attempts): void {
+        $attempts++;
+        DB::table('visitor_cards')->insert([
+            'id' => (string) Str::uuid7(),
+            'card_no' => 'IMPORT-CLASH',
+            'status' => 'available',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    });
+
+    try {
+        $file = makeXlsxUpload([
+            ['ID Type' => 'ktp', 'ID Number' => '6210000000000402', 'Name' => 'Never Persisted', 'Company' => ''],
+        ]);
+
+        $this->post('/api/visitors/import', ['file' => $file])
+            ->assertStatus(500)
+            ->assertExactJson([
+                'message' => 'Import failed',
+                'error' => 'The file conflicts with an existing record.',
+            ]);
+
+        expect($attempts)->toBe(1);
+        expect(Visitor::count())->toBe(0);
+        Exceptions::assertReported(UniqueConstraintViolationException::class);
+    } finally {
+        Visitor::flushEventListeners();
+        Visitor::clearBootedModels();
+    }
 });

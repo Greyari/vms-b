@@ -5,7 +5,9 @@ use App\Models\VehicleCard;
 use App\Models\Visit;
 use App\Models\Visitor;
 use App\Models\VisitorCard;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Str;
 
 beforeEach(function () {
@@ -152,6 +154,46 @@ it('rejects a well-formed but non-existent staff_id with 422', function () {
         ->assertStatus(422);
 });
 
+it('retries a check-in that loses a visitor_no race once and creates exactly one visitor', function () {
+    $triggered = false;
+    raceVisitorNoOnCreating(function (Visitor $visitor) use (&$triggered): void {
+        if ($triggered) {
+            return;
+        }
+        $triggered = true;
+        DB::table('visitors')->insert([
+            'id' => (string) Str::uuid7(),
+            'id_type' => 'ktp',
+            'id_number' => 'RACEDECOY'.$visitor->visitor_no,
+            'name' => 'Race Decoy',
+            'visitor_no' => $visitor->visitor_no,
+            'is_blacklisted' => false,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    });
+
+    try {
+        $response = $this->postJson('/api/visits', validVisitPayload(['id_number' => '3210000000000501']));
+
+        $response->assertStatus(201);
+        expect(Visitor::where('id_number', '3210000000000501')->count())->toBe(1);
+        expect(Visit::count())->toBe(1);
+        // Not asserted: that the recomputed visitor_no differs from the raced
+        // one. It provably can't, here — the decoy is written inside the same
+        // per-attempt DB::transaction() as the failed insert (see the
+        // Visitor::nextVisitorNo() docblock), so losing the race rolls the
+        // decoy back too, and the retry's nextVisitorNo() sees an empty table
+        // again and recomputes the same floor value. VisitorImportTest.php's
+        // three race tests hit the identical mechanics and assert the same
+        // way: exactly the right rows exist, and the decoy never persisted.
+        expect(Visitor::where('name', 'Race Decoy')->exists())->toBeFalse();
+    } finally {
+        Visitor::flushEventListeners();
+        Visitor::clearBootedModels();
+    }
+});
+
 it('treats the same id_number with a different id_type as a second visitor (M2)', function () {
     Visitor::factory()->create([
         'id_type' => 'ktp',
@@ -172,4 +214,63 @@ it('treats the same id_number with a different id_type as a second visitor (M2)'
     ])->assertStatus(201);
 
     expect(Visitor::where('id_number', '3210000000000042')->count())->toBe(2);
+});
+
+it('does not retry a check-in that fails on an unrelated unique index', function () {
+    Exceptions::fake();
+    $payload = validVisitPayload(['id_number' => '3210000000000601']);
+    $existingCardNo = VisitorCard::findOrFail($payload['card_ids'][0])->card_no;
+    $attempts = 0;
+
+    // Boot Visit first so this listener runs after the model's own ones.
+    new Visit;
+    Visit::creating(function () use (&$attempts, $existingCardNo): void {
+        $attempts++;
+        DB::table('visitor_cards')->insert([
+            'id' => (string) Str::uuid7(),
+            'card_no' => $existingCardNo,
+            'status' => 'available',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    });
+
+    try {
+        $this->postJson('/api/visits', $payload)
+            ->assertStatus(500)
+            ->assertJsonPath('error', 'The visit conflicts with an existing record.');
+
+        expect($attempts)->toBe(1);
+        expect(Visit::count())->toBe(0);
+        Exceptions::assertReported(UniqueConstraintViolationException::class);
+    } finally {
+        Visit::flushEventListeners();
+        Visit::clearBootedModels();
+    }
+});
+
+it('hides an unexpected check-in error from the client and reports it', function () {
+    Exceptions::fake();
+    $payload = validVisitPayload(['id_number' => '3210000000000602']);
+
+    // Boot Visit first so this listener runs after the model's own ones.
+    new Visit;
+    Visit::creating(function (): void {
+        throw new RuntimeException('PRIVATE-SQL-DETAIL');
+    });
+
+    try {
+        $this->postJson('/api/visits', $payload)
+            ->assertStatus(500)
+            ->assertExactJson([
+                'message' => 'Failed to record visit',
+                'error' => 'An unexpected error stopped the visit from being recorded.',
+            ]);
+
+        expect(Visit::count())->toBe(0);
+        Exceptions::assertReported(fn (RuntimeException $e): bool => $e->getMessage() === 'PRIVATE-SQL-DETAIL');
+    } finally {
+        Visit::flushEventListeners();
+        Visit::clearBootedModels();
+    }
 });
