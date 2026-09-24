@@ -17,19 +17,24 @@ final class TicketNumber
 {
     public static function next(?CarbonInterface $now = null): string
     {
-        $now ??= now();
-
         SequenceLock::acquire('ticket_number');
 
-        $prefix = $now->format('y/m/');
+        // Read the clock after any wait for the lock, so a request that waited
+        // across a month end is numbered in the month it is recorded.
+        $now ??= now();
 
-        // Within one month the fixed-width counter sorts in issue order as a
-        // string, so the highest ticket carries the highest counter. IS NOT NULL
-        // lets PostgreSQL walk the unique index backwards from the newest ticket
-        // instead of wading through imported visits, which have none.
+        $prefix = $now->format('y/m/');
+        $start = $prefix.'00000';
+        $nextMonth = $now->copy()->startOfMonth()->addMonth();
+        $end = $nextMonth->format('y/m/').'00000';
+
+        // Range comparison (>= $start and < $end) allows PostgreSQL to utilize
+        // a backward B-tree index scan on visits_ticket_number_unique across all
+        // collations without falling back to sequential scan on high volumes.
         $latest = Visit::query()
             ->whereNotNull('ticket_number')
-            ->where('ticket_number', 'like', $prefix.'%')
+            ->where('ticket_number', '>=', $start)
+            ->where('ticket_number', '<', $end)
             ->orderByDesc('ticket_number')
             ->value('ticket_number');
 

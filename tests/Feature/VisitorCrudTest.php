@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Location;
 use App\Models\Staff;
 use App\Models\VesselArrival;
 use App\Models\Visit;
@@ -118,12 +119,14 @@ it('removes a visitor from the blacklist and clears the reason', function () {
 it('refuses to delete a visitor with visit history and leaves data intact (C1)', function () {
     $staff = Staff::factory()->create();
     $card = VisitorCard::factory()->create();
+    $location = Location::factory()->create();
 
     $store = $this->postJson('/api/visits', [
         'id_type' => 'ktp',
         'id_number' => '5555555555555555',
         'name' => 'Has History',
         'staff_id' => $staff->id,
+        'location_id' => $location->id,
         'card_ids' => [$card->id],
         'purpose' => 'Meeting',
     ]);

@@ -4,12 +4,15 @@ namespace App\Models;
 
 use App\Traits\HasUuidV7;
 use App\Traits\LogsActivity;
+use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class VesselArrival extends Model
 {
     use HasFactory, HasUuidV7, LogsActivity;
+
+    protected $appends = ['total_days'];
 
     protected $fillable = [
         'location_id', 'vessel_name', 'sign_in_date', 'sign_out_date', 'sign_in_port', 'sign_out_port', 'captain',
@@ -23,9 +26,21 @@ class VesselArrival extends Model
     protected function casts(): array
     {
         return [
-            'sign_in_date' => 'date',
-            'sign_out_date' => 'date',
+            'sign_in_date' => 'date:Y-m-d',
+            'sign_out_date' => 'date:Y-m-d',
         ];
+    }
+
+    public function getTotalDaysAttribute(): int
+    {
+        if ($this->sign_in_date === null) {
+            return 0;
+        }
+
+        $signIn = Carbon::parse($this->sign_in_date)->startOfDay();
+        $signOut = $this->sign_out_date ? Carbon::parse($this->sign_out_date)->startOfDay() : now()->startOfDay();
+
+        return (int) $signIn->diffInDays($signOut);
     }
 
     public function vessel()

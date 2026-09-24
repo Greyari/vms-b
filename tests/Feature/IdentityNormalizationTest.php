@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Location;
 use App\Models\Staff;
 use App\Models\Visitor;
 use App\Models\VisitorCard;
@@ -13,12 +14,14 @@ beforeEach(function () {
 it('stores a normalized id_number when a visit registers a new visitor', function () {
     $staff = Staff::factory()->create();
     $card = VisitorCard::factory()->create();
+    $location = Location::factory()->create();
 
     $this->postJson('/api/visits', [
         'id_type' => 'ktp',
         'id_number' => '3210-0000 0000 0001',
         'name' => 'Spaced Out',
         'staff_id' => $staff->id,
+        'location_id' => $location->id,
         'card_ids' => [$card->id],
         'purpose' => 'Meeting',
     ])->assertStatus(201);
@@ -30,12 +33,14 @@ it('treats a differently punctuated number as the same visitor', function () {
     Visitor::factory()->create(['id_type' => 'passport', 'id_number' => 'A1234567', 'name' => 'Existing']);
     $staff = Staff::factory()->create();
     $card = VisitorCard::factory()->create();
+    $location = Location::factory()->create();
 
     $this->postJson('/api/visits', [
         'id_type' => 'passport',
         'id_number' => ' a-1234567 ',
         'name' => 'Typed Differently',
         'staff_id' => $staff->id,
+        'location_id' => $location->id,
         'card_ids' => [$card->id],
         'purpose' => 'Meeting',
     ])->assertStatus(201);

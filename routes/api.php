@@ -5,13 +5,17 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CardController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\HealthDbController;
+use App\Http\Controllers\Api\LocationController;
+use App\Http\Controllers\Api\LookupController;
 use App\Http\Controllers\Api\MailTestController;
 use App\Http\Controllers\Api\PermissionController;
 use App\Http\Controllers\Api\ProfileController;
+use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\RoleController;
 use App\Http\Controllers\Api\StaffController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\VehicleCardController;
+use App\Http\Controllers\Api\VesselArrivalController;
 use App\Http\Controllers\Api\VisitController;
 use App\Http\Controllers\Api\VisitorController;
 use Illuminate\Support\Facades\Route;
@@ -31,26 +35,51 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/profile', [ProfileController::class, 'update']);
     Route::put('/profile/password', [ProfileController::class, 'updatePassword']);
 
+    // --- Lookups: form suggestions, open to every signed-in user ---------
+    Route::prefix('lookups')->group(function () {
+        Route::get('/nationalities', [LookupController::class, 'nationalities']);
+        Route::get('/companies', [LookupController::class, 'companies']);
+        Route::get('/purposes', [LookupController::class, 'purposes']);
+        Route::get('/card-types', [LookupController::class, 'cardTypes']);
+    });
+
     // --- Visits (read) --------------------------------------------------
     Route::middleware('permission:view_visits')->group(function () {
         Route::get('/dashboard', [DashboardController::class, 'index']);
         Route::get('/visitors/check-ktp/{ktp}', [VisitController::class, 'checkKtp']);
         Route::get('/visits/search', [VisitController::class, 'searchVisitor']);
         Route::get('/visits/active', [VisitController::class, 'activeVisits']);
-        Route::get('/visits/history', [VisitController::class, 'history']);
+        Route::get('/visits/reprint', [VisitController::class, 'reprint']);
         Route::get('/visits/{id}/print', [VisitController::class, 'print']);
     });
 
+    // --- Reports --------------------------------------------------------
+    Route::middleware('permission:view_reports')->group(function () {
+        Route::get('/reports/visits', [ReportController::class, 'visits']);
+        Route::get('/visits/history', [ReportController::class, 'visits']);
+        Route::get('/reports/vessels', [ReportController::class, 'vessels']);
+
+        Route::middleware('permission:export_visits')->group(function () {
+            Route::get('/reports/visits/export', [ReportController::class, 'exportVisits']);
+            Route::get('/reports/visits/pdf', [ReportController::class, 'exportVisitsPdf']);
+            Route::get('/visits/export', [ReportController::class, 'exportVisits']);
+            Route::get('/visits/export-pdf', [ReportController::class, 'exportVisitsPdf']);
+            Route::get('/reports/vessels/export', [ReportController::class, 'exportVessels']);
+        });
+    });
+
     // --- Visits (write) -------------------------------------------------
-    Route::get('/visits/export', [VisitController::class, 'export'])->middleware('permission:export_visits');
-    Route::get('/visits/export-pdf', [VisitController::class, 'exportPdf'])->middleware('permission:export_visits');
     Route::post('/visits', [VisitController::class, 'store'])->middleware('permission:create_visits');
+    Route::put('/visits/{id}', [VisitController::class, 'update'])->middleware('permission:update_visits')->whereUuid('id');
     Route::post('/visits/{id}/checkout', [VisitController::class, 'checkout'])->middleware('permission:checkout_visits');
     Route::delete('/visits/{id}', [VisitController::class, 'destroy'])->middleware('permission:delete_visits');
 
     // --- Visitors -------------------------------------------------------
     Route::get('/visitors', [VisitorController::class, 'index'])->middleware('permission:view_visitors');
     Route::get('/visitors/blacklisted', [VisitorController::class, 'blacklisted'])->middleware('permission:view_visitors');
+    Route::get('/visitors/{id}', [VisitorController::class, 'show'])->middleware('permission:view_visitors')->whereUuid('id');
+    Route::post('/visitors', [VisitorController::class, 'store'])->middleware('permission:create_visitors');
+    Route::get('/visitors/{id}/visits', [VisitorController::class, 'visits'])->middleware('permission:view_visitors')->whereUuid('id');
 
     Route::middleware('permission:manage_visitors')->group(function () {
         Route::get('/visitors/export', [VisitorController::class, 'export']);
@@ -72,6 +101,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Specific routes must precede the apiResource so they aren't captured by {staff}.
     Route::middleware('permission:manage_staffs')->group(function () {
         Route::get('/staffs/template/download', [StaffController::class, 'downloadTemplate']);
+        Route::get('/staffs/export', [StaffController::class, 'export']);
         Route::post('/staffs/import', [StaffController::class, 'import']);
         Route::get('/staffs/trashed', [StaffController::class, 'trashed']);
         Route::post('/staffs/{id}/restore', [StaffController::class, 'restore']);
@@ -82,6 +112,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // --- Cards ----------------------------------------------------------
     Route::middleware('permission:manage_cards')->group(function () {
         Route::get('/cards/template/download', [CardController::class, 'downloadTemplate']);
+        Route::get('/cards/export', [CardController::class, 'export']);
         Route::post('/cards/import', [CardController::class, 'import']);
         Route::get('/cards/trashed', [CardController::class, 'trashed']);
         Route::post('/cards/{id}/restore', [CardController::class, 'restore']);
@@ -98,6 +129,29 @@ Route::middleware('auth:sanctum')->group(function () {
     });
     Route::apiResource('vehicle-cards', VehicleCardController::class)->only(['index', 'show'])->middleware('permission:view_cards');
     Route::apiResource('vehicle-cards', VehicleCardController::class)->only(['store', 'update', 'destroy'])->middleware('permission:manage_cards');
+
+    // --- Locations and vessels -------------------------------------------
+    Route::middleware('permission:view_locations')->group(function () {
+        Route::get('/locations', [LocationController::class, 'index']);
+        Route::get('/locations/{id}', [LocationController::class, 'show'])->whereUuid('id');
+    });
+    Route::middleware('permission:manage_locations')->group(function () {
+        Route::post('/locations', [LocationController::class, 'store']);
+        Route::put('/locations/{id}', [LocationController::class, 'update'])->whereUuid('id');
+        Route::delete('/locations/{id}', [LocationController::class, 'destroy'])->whereUuid('id');
+    });
+
+    // --- Vessel arrivals ------------------------------------------------
+    Route::middleware('permission:view_vessel_arrivals')->group(function () {
+        Route::get('/vessel-arrivals', [VesselArrivalController::class, 'index']);
+        Route::get('/vessel-arrivals/crew-candidates', [VesselArrivalController::class, 'crewCandidates']);
+        Route::get('/vessel-arrivals/{id}', [VesselArrivalController::class, 'show'])->whereUuid('id');
+    });
+    Route::middleware('permission:manage_vessel_arrivals')->group(function () {
+        Route::post('/vessel-arrivals', [VesselArrivalController::class, 'store']);
+        Route::put('/vessel-arrivals/{id}', [VesselArrivalController::class, 'update'])->whereUuid('id');
+        Route::delete('/vessel-arrivals/{id}', [VesselArrivalController::class, 'destroy'])->whereUuid('id');
+    });
 
     // --- System settings ------------------------------------------------
     Route::get('/permissions', [PermissionController::class, 'index'])->middleware('permission:view_roles');

@@ -21,12 +21,14 @@ it('records the full checkout timestamp for a checkout on a later day', function
     Carbon::setTestNow('2026-09-12 22:15:00');
     $staff = Staff::factory()->create();
     $card = VisitorCard::factory()->create();
+    $location = Location::factory()->create();
 
     $visitId = $this->postJson('/api/visits', [
         'id_type' => 'ktp',
         'id_number' => '3210000000000301',
         'name' => 'Night Crew',
         'staff_id' => $staff->id,
+        'location_id' => $location->id,
         'card_ids' => [$card->id],
         'purpose' => 'RETURN TO VESSEL',
     ])->assertStatus(201)->json('visit.id');

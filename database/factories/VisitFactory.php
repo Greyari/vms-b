@@ -15,8 +15,10 @@ class VisitFactory extends Factory
 {
     protected $model = Visit::class;
 
-    /** Sequence base kept high so factory tickets never collide with the
-     *  controller's year-scoped 00001.. auto-numbering under test. */
+    /** Factory tickets use the current month's prefix and start high. A
+     *  check-in continues above factory visits created before it, but a
+     *  factory visit created after a check-in in the same test can collide
+     *  with that check-in's ticket. */
     protected static int $seq = 10000;
 
     public function definition(): array

@@ -88,12 +88,14 @@ it('returns the recorded visit without the visitor profile', function () {
     $visitor = visitorWithPrivateProfile();
     $staff = Staff::factory()->create();
     $card = VisitorCard::factory()->create();
+    $location = Location::factory()->create();
 
     $response = $this->postJson('/api/visits', [
         'id_type' => $visitor->id_type,
         'id_number' => $visitor->id_number,
         'name' => $visitor->name,
         'staff_id' => $staff->id,
+        'location_id' => $location->id,
         'card_ids' => [$card->id],
         'purpose' => 'Meeting',
     ])->assertStatus(201);

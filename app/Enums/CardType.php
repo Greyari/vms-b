@@ -17,4 +17,18 @@ enum CardType: string
     case Special = 'special';
     case Commissioning = 'commissioning';
     case Visitor = 'visitor';
+
+    /** The name the card master and the report filters show. */
+    public function label(): string
+    {
+        return match ($this) {
+            self::Crew => 'Crew',
+            self::VisitorGreen => 'Visitor (green)',
+            self::VisitorWhite => 'Visitor (white)',
+            self::TemporaryWorker => 'Temporary worker',
+            self::Special => 'Special',
+            self::Commissioning => 'Commissioning',
+            self::Visitor => 'Visitor',
+        };
+    }
 }

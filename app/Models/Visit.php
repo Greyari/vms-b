@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Traits\HasUuidV7;
 use App\Traits\LogsActivity;
+use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -57,5 +58,16 @@ class Visit extends Model
     public function vehicleCard()
     {
         return $this->belongsTo(VehicleCard::class)->withTrashed();
+    }
+
+    public function getDaysOpenAttribute(): int
+    {
+        if ($this->date === null) {
+            return 0;
+        }
+
+        return $this->checked_out_at === null
+            ? (int) Carbon::parse($this->date)->diffInDays(now()->startOfDay())
+            : (int) Carbon::parse($this->date)->diffInDays($this->checked_out_at->startOfDay());
     }
 }

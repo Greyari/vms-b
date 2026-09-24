@@ -2,10 +2,16 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\VisitorType;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\VisitorProfileRequest;
+use App\Http\Resources\VisitorProfileResource;
 use App\Http\Resources\VisitorSummaryResource;
+use App\Http\Resources\VisitResource;
+use App\Models\Visit;
 use App\Models\Visitor;
 use App\Support\IdentityNumber;
+use App\Support\NumberingRetry;
 use App\Support\UniqueViolation;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
@@ -13,26 +19,29 @@ use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Carbon;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Spatie\SimpleExcel\SimpleExcelReader;
 use Spatie\SimpleExcel\SimpleExcelWriter;
 
 class VisitorController extends Controller
 {
     /**
-     * Shared builder for the paginated visitor lists (active + blacklisted),
-     * applying case-insensitive search + a whitelisted sort. Postgres LIKE is
+     * Visitors matching the list screen's filters: a case-insensitive search
+     * on name, company or ID number, and the visitor type. Postgres LIKE is
      * case-sensitive, so search goes through LOWER(...) with user wildcards
-     * escaped.
+     * escaped. Shared by the lists and the export.
      */
-    private function paginatedVisitors(Request $request, bool $blacklisted): LengthAwarePaginator
+    private function filteredVisitors(Request $request, bool $blacklisted): Builder
     {
-        $perPage = (int) $request->input('per_page', 15);
-        $perPage = max(1, min($perPage, 100));
+        $request->validate(['visitor_type' => ['nullable', Rule::enum(VisitorType::class)]]);
 
-        $query = Visitor::withCount('visits')
-            ->where('is_blacklisted', $blacklisted);
+        $query = Visitor::query()->where('is_blacklisted', $blacklisted);
+
+        if ($request->filled('visitor_type')) {
+            $query->where('visitor_type', $request->input('visitor_type'));
+        }
 
         $search = trim((string) $request->input('search', ''));
         if ($search !== '') {
@@ -47,7 +56,21 @@ class VisitorController extends Controller
             });
         }
 
-        $sortWhitelist = ['name', 'id_number', 'company', 'created_at', 'visits_count'];
+        return $query;
+    }
+
+    /**
+     * The paginated visitor lists (active and blacklisted) with a whitelisted
+     * sort.
+     */
+    private function paginatedVisitors(Request $request, bool $blacklisted): LengthAwarePaginator
+    {
+        $perPage = (int) $request->input('per_page', 15);
+        $perPage = max(1, min($perPage, 100));
+
+        $query = $this->filteredVisitors($request, $blacklisted)->withCount('visits');
+
+        $sortWhitelist = ['visitor_no', 'name', 'id_number', 'company', 'created_at', 'visits_count'];
         $sort = $request->input('sort', 'name');
         if (! in_array($sort, $sortWhitelist, true)) {
             $sort = 'name';
@@ -67,27 +90,107 @@ class VisitorController extends Controller
         return response()->json($this->paginatedVisitors($request, false));
     }
 
-    public function update(Request $request, $id)
+    /**
+     * The profile screen: the whole profile, and a summary of the visits —
+     * how many, the first and the last date, and the open one if any.
+     */
+    public function show(string $id): JsonResponse
     {
+        $visitor = Visitor::with('vessel')->withCount('visits')->findOrFail($id);
+
+        return response()->json([
+            'visitor' => (new VisitorProfileResource($visitor))->resolve(),
+            'summary' => [
+                'visits_count' => $visitor->visits_count,
+                'first_visit_date' => $visitor->visits()->min('date'),
+                'last_visit_date' => $visitor->visits()->max('date'),
+                'open_visit_id' => $visitor->visits()->open()->latest('date')->value('id'),
+            ],
+        ]);
+    }
+
+    /**
+     * A visitor's visits one month at a time, as VMS-old's registration screen
+     * showed them: every month that has visits (newest first, with a count),
+     * and the visits of the requested month, by default the newest one.
+     */
+    public function visits(Request $request, string $id): JsonResponse
+    {
+        $request->validate(['month' => ['nullable', 'date_format:Y-m']]);
+
         $visitor = Visitor::findOrFail($id);
 
-        if (is_string($request->input('id_number'))) {
-            $request->merge(['id_number' => IdentityNumber::normalize($request->input('id_number'))]);
+        $months = $visitor->visits()
+            ->orderByDesc('date')
+            ->pluck('date')
+            ->countBy(fn (string $date): string => substr($date, 0, 7))
+            ->map(fn (int $count, string $month): array => ['month' => $month, 'visits' => $count])
+            ->values();
+
+        $month = $request->input('month') ?? ($months->isEmpty() ? null : $months->first()['month']);
+
+        $visits = collect();
+        if ($month !== null) {
+            // A real month end: PostgreSQL refuses a date such as 2026-02-31.
+            $start = Carbon::createFromFormat('!Y-m', $month);
+            $visits = $visitor->visits()
+                ->with(['staff', 'location', 'visitorCards', 'vehicleCard'])
+                ->whereBetween('date', [$start->toDateString(), $start->copy()->endOfMonth()->toDateString()])
+                ->orderByDesc('date')
+                ->orderByDesc('time_in')
+                ->get()
+                ->map(fn (Visit $visit): array => (new VisitResource($visit))->resolve());
         }
 
-        $validated = $request->validate([
-            'id_type' => 'required|in:ktp,sim,passport',
-            // M3 — identity is (id_type, id_number); enforce the composite
-            // uniqueness in validation so a clash returns 422, not a DB 500.
-            'id_number' => [
-                'required', 'string',
-                Rule::unique('visitors', 'id_number')
-                    ->where(fn ($q) => $q->where('id_type', $request->input('id_type')))
-                    ->ignore($id),
-            ],
-            'name' => 'required|string',
-            'company' => 'nullable|string',
+        return response()->json([
+            'months' => $months,
+            'month' => $month,
+            'visits' => $visits->values(),
         ]);
+    }
+
+    /**
+     * Registers a visitor with a full profile — the quick registration at
+     * check-in and the visitor master both use it. The next visitor_no is
+     * allocated inside the transaction NumberingRetry opens.
+     */
+    public function store(VisitorProfileRequest $request): JsonResponse
+    {
+        $validated = $request->validated();
+
+        try {
+            $visitor = NumberingRetry::run(fn (): Visitor => Visitor::create($validated));
+        } catch (UniqueConstraintViolationException $e) {
+            // Another request registered the same person between validation
+            // and insert: the same answer as the unique rule gives.
+            if (UniqueViolation::violates($e, 'visitors', ['id_type', 'id_number'])) {
+                throw ValidationException::withMessages([
+                    'id_number' => VisitorProfileRequest::DUPLICATE_IDENTITY,
+                ]);
+            }
+
+            // The exception carries SQL with the visitor's data: the client
+            // gets a fixed message and the log keeps the detail.
+            report($e);
+
+            return response()->json([
+                'message' => 'Failed to register visitor',
+                'error' => UniqueViolation::isRetryable($e)
+                    ? 'Could not allocate a unique visitor number, please retry.'
+                    : 'The visitor conflicts with an existing record.',
+            ], 500);
+        }
+
+        return response()->json([
+            'message' => 'Visitor registered successfully',
+            'visitor' => (new VisitorSummaryResource($visitor->refresh()))->resolve(),
+        ], 201);
+    }
+
+    public function update(VisitorProfileRequest $request, $id)
+    {
+        $visitor = Visitor::findOrFail($id);
+        $validated = $request->validated();
 
         // M4 — block blacklist-evasion by renumbering: a blacklisted visitor
         // may not have their identity changed. They must be removed from the
@@ -176,20 +279,40 @@ class VisitorController extends Controller
         return response()->json(['message' => 'Visitor deleted successfully']);
     }
 
-    public function export()
+    /**
+     * The visitor master as Excel, with the profile columns and the list's
+     * filters. Rows stream in chunks: the imported registry holds some
+     * 150,000 visitors, too many to load at once.
+     */
+    public function export(Request $request)
     {
-        $visitors = Visitor::where('is_blacklisted', false)->orderBy('name')->get();
+        $visitors = $this->filteredVisitors($request, false)->with('vessel');
 
         return response()->streamDownload(function () use ($visitors) {
             $writer = SimpleExcelWriter::streamDownload('visitors.xlsx');
-            foreach ($visitors as $v) {
+            $visitors->lazyById(1000)->each(function (Visitor $v) use ($writer): void {
                 $writer->addRow([
+                    'Visitor No' => $v->visitor_no,
+                    'Name' => $v->name,
                     'ID Type' => strtoupper($v->id_type),
                     'ID Number' => $v->id_number,
-                    'Name' => $v->name,
-                    'Company' => $v->company ?? '-',
+                    'Visitor Type' => $v->visitor_type?->value,
+                    'Gender' => $v->gender,
+                    'Birth Date' => $v->birth_date?->format('Y-m-d'),
+                    'Birth Place' => $v->birth_place,
+                    'Nationality' => $v->nationality,
+                    'Occupation' => $v->occupation,
+                    'Phone' => $v->phone,
+                    'Company' => $v->company,
+                    'ID Issued' => $v->id_issued_at?->format('Y-m-d'),
+                    'ID Expires' => $v->id_lifetime ? 'Lifetime' : $v->id_expires_at?->format('Y-m-d'),
+                    'Vessel' => $v->vessel?->code,
+                    'Certificate' => $v->certificate,
+                    'Certificate No' => $v->certificate_no,
+                    'Seaman Book No' => $v->seaman_book_no,
+                    'Seaman Book Expires' => $v->seaman_book_expires_at?->format('Y-m-d'),
                 ]);
-            }
+            });
         }, 'visitors.xlsx');
     }
 
@@ -314,54 +437,36 @@ class VisitorController extends Controller
     }
 
     /**
-     * Runs one import attempt inside its own transaction, retrying — the
-     * whole attempt, transaction included — up to 3 times in total when it
-     * throws a UniqueConstraintViolationException that
-     * UniqueViolation::isRetryable() accepts: the attempt lost a visitor_no
-     * allocation race (see Visitor::nextVisitorNo()). The transaction has
-     * already rolled back everything the attempt wrote, so a retry recomputes
-     * cleanly. Any other unique violation ends the import at once, and every
-     * failure is reported to the log. Shared by import() and
-     * importBlacklist() so the retry loop exists in one place.
+     * Runs one import attempt through NumberingRetry: inside its own
+     * transaction, retried — the whole attempt, transaction included — when it
+     * lost a visitor_no allocation race (see Visitor::nextVisitorNo()). Any
+     * other unique violation ends the import at once, and every failure is
+     * reported to the log. Shared by import() and importBlacklist().
      *
      * $attempt must be self-contained: it (re-)initializes its own created/
      * updated/skipped/errors counters on every call — a retried attempt never
      * inherits state from the one that was just rolled back, so a lost race
      * is never double-counted — and it returns the success JsonResponse
-     * itself, which is returned unchanged by DB::transaction() on a
-     * successful attempt.
+     * itself, which is returned unchanged on a successful attempt.
      *
      * @param  callable(): JsonResponse  $attempt
      */
     private function runImportWithRetry(callable $attempt): JsonResponse
     {
-        $maxAttempts = 3;
+        try {
+            return NumberingRetry::run($attempt);
+        } catch (UniqueConstraintViolationException $e) {
+            // The exception carries SQL with the file's data: the client gets
+            // a fixed message and the log keeps the detail. A violation that is
+            // still retryable here means every attempt lost the race.
+            report($e);
 
-        for ($i = 1; ; $i++) {
-            try {
-                return DB::transaction($attempt);
-            } catch (UniqueConstraintViolationException $e) {
-                // The exception carries SQL with the file's data: the client
-                // gets a fixed message and the log keeps the detail.
-                if (! UniqueViolation::isRetryable($e)) {
-                    report($e);
-
-                    return response()->json([
-                        'message' => 'Import failed',
-                        'error' => 'The file conflicts with an existing record.',
-                    ], 500);
-                }
-
-                if ($i >= $maxAttempts) {
-                    report($e);
-
-                    return response()->json([
-                        'message' => 'Import failed',
-                        'error' => 'Could not allocate a unique visitor number, please retry.',
-                    ], 500);
-                }
-                // loop again
-            }
+            return response()->json([
+                'message' => 'Import failed',
+                'error' => UniqueViolation::isRetryable($e)
+                    ? 'Could not allocate a unique visitor number, please retry.'
+                    : 'The file conflicts with an existing record.',
+            ], 500);
         }
     }
 

@@ -70,8 +70,8 @@ class Visitor extends Model
      * transaction (SequenceLock refuses otherwise); SQLite serialises writers
      * by itself. The unique index stays the last line of defence, and the
      * callers that create visitors retry when UniqueViolation::isRetryable()
-     * accepts the violation: VisitController::store and
-     * VisitorController::runImportWithRetry().
+     * accepts the violation: VisitController::store with its own loop, and
+     * POST /visitors and the imports through App\Support\NumberingRetry.
      */
     public static function nextVisitorNo(): int
     {

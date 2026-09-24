@@ -1,6 +1,9 @@
 <?php
 
+use App\Models\Location;
 use App\Models\Staff;
+use App\Models\User;
+use App\Models\Visit;
 use App\Models\Visitor;
 use App\Models\VisitorCard;
 
@@ -52,6 +55,7 @@ it('allows a security-role user to list visitors (200)', function () {
 it('allows a security-role user to create and check out a visit (200/201)', function () {
     $staff = Staff::factory()->create();
     $card = VisitorCard::factory()->create();
+    $location = Location::factory()->create();
     actingAsSecurity();
 
     $store = $this->postJson('/api/visits', [
@@ -59,6 +63,7 @@ it('allows a security-role user to create and check out a visit (200/201)', func
         'id_number' => '3210000000000001',
         'name' => 'Walk In',
         'staff_id' => $staff->id,
+        'location_id' => $location->id,
         'card_ids' => [$card->id],
         'purpose' => 'Meeting',
     ]);
@@ -87,4 +92,38 @@ it('lets an admin pass every permission-gated endpoint the security user is deni
 it('rejects unauthenticated requests to protected endpoints with 401', function () {
     $this->getJson('/api/visitors')->assertStatus(401);
     $this->postJson('/api/staffs', [])->assertStatus(401);
+    $this->putJson('/api/visits/01a00000-0000-7000-8000-000000000001', [])->assertStatus(401);
+});
+
+it('allows security, supervisor, and admin to update an open visit with PUT /visits/{id}', function () {
+    $visit = Visit::factory()->create();
+
+    actingAsSecurity();
+    $this->putJson("/api/visits/{$visit->id}", ['purpose' => 'Security Edit'])->assertOk();
+
+    $supervisor = User::factory()->create();
+    $supervisor->assignRole('supervisor');
+    actingAsUser($supervisor);
+    $this->putJson("/api/visits/{$visit->id}", ['purpose' => 'Supervisor Edit'])->assertOk();
+
+    actingAsAdmin();
+    $this->putJson("/api/visits/{$visit->id}", ['purpose' => 'Admin Edit'])->assertOk();
+});
+
+it('forbids a user without update_visits permission from updating a visit (403)', function () {
+    $visit = Visit::factory()->create();
+
+    $viewerOnly = User::factory()->create();
+    $viewerOnly->givePermissionTo('view_visits');
+    actingAsUser($viewerOnly);
+
+    $this->putJson("/api/visits/{$visit->id}", ['purpose' => 'Viewer Edit'])->assertStatus(403);
+});
+
+it('forbids a security-role user from accessing vessel arrivals and reports endpoints (403 JSON)', function () {
+    actingAsSecurity();
+
+    $this->getJson('/api/vessel-arrivals')->assertStatus(403)->assertJsonStructure(['message']);
+    $this->getJson('/api/reports/visits')->assertStatus(403)->assertJsonStructure(['message']);
+    $this->getJson('/api/reports/vessels')->assertStatus(403)->assertJsonStructure(['message']);
 });

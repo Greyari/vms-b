@@ -5,8 +5,10 @@ use App\Models\Visitor;
 use Database\Seeders\RoleAndPermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Testing\TestResponse;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\PermissionRegistrar;
+use Spatie\SimpleExcel\SimpleExcelReader;
 use Tests\TestCase;
 
 /*
@@ -62,6 +64,14 @@ function actingAsSecurity(): User
     return actingAsUser(securityUser());
 }
 
+function actingAsSupervisor(): User
+{
+    $supervisor = User::factory()->create();
+    $supervisor->assignRole('supervisor');
+
+    return actingAsUser($supervisor);
+}
+
 /**
  * Skip unless the suite runs on PostgreSQL. SQLite stays the fast default
  * (phpunit.xml); the pgsql group covers what SQLite cannot check: PG-only SQL
@@ -102,4 +112,24 @@ function raceVisitorNoOnCreating(callable $onCreating): void
     Visitor::creating(function (Visitor $visitor) use ($onCreating): void {
         $onCreating($visitor);
     });
+}
+
+/**
+ * The rows of an XLSX download, keyed by the header row. The streamed body is
+ * written to a temporary file because the reader needs a path.
+ *
+ * @return array<int, array<string, mixed>>
+ */
+function exportedRows(TestResponse $response): array
+{
+    $base = tempnam(sys_get_temp_dir(), 'vmsexport_');
+    $path = $base.'.xlsx';
+    file_put_contents($path, $response->streamedContent());
+
+    try {
+        return SimpleExcelReader::create($path)->getRows()->all();
+    } finally {
+        @unlink($path);
+        @unlink($base);
+    }
 }

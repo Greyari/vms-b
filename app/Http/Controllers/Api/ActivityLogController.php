@@ -49,12 +49,14 @@ class ActivityLogController extends Controller
         }
 
         if ($request->filled('search')) {
-            $term = '%'.$request->input('search').'%';
+            // Postgres LIKE is case-sensitive, and usernames are stored upper
+            // case: compare lower-cased, with the user's wildcards escaped.
+            $term = '%'.strtolower(addcslashes((string) $request->input('search'), '%_\\')).'%';
             $query->where(function ($q) use ($term) {
-                $q->where('causer_name', 'like', $term)
-                    ->orWhere('causer_email', 'like', $term)
-                    ->orWhere('causer_username', 'like', $term)
-                    ->orWhere('subject_label', 'like', $term);
+                $q->whereRaw('LOWER(causer_name) LIKE ?', [$term])
+                    ->orWhereRaw('LOWER(causer_email) LIKE ?', [$term])
+                    ->orWhereRaw('LOWER(causer_username) LIKE ?', [$term])
+                    ->orWhereRaw('LOWER(subject_label) LIKE ?', [$term]);
             });
         }
 

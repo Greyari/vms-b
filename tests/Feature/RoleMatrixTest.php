@@ -75,3 +75,45 @@ it('keeps security out of visitor and card management', function () {
     ])->assertStatus(403);
     $this->postJson('/api/cards', ['card_no' => 'VC-SEC-1', 'status' => 'available'])->assertStatus(403);
 });
+
+it('keeps security role strictly forbidden from vessel arrivals, reports, and legacy report aliases', function () {
+    actingAsSecurity();
+
+    $dummyUuid = '01921312-3456-789a-bcde-f0123456789a';
+
+    // Vessel arrivals
+    $this->getJson('/api/vessel-arrivals')->assertForbidden();
+    $this->postJson('/api/vessel-arrivals', [])->assertForbidden();
+    $this->getJson("/api/vessel-arrivals/{$dummyUuid}")->assertForbidden();
+    $this->putJson("/api/vessel-arrivals/{$dummyUuid}", [])->assertForbidden();
+    $this->deleteJson("/api/vessel-arrivals/{$dummyUuid}")->assertForbidden();
+    $this->getJson('/api/vessel-arrivals/crew-candidates')->assertForbidden();
+
+    // Reports and exports
+    $this->getJson('/api/reports/visits')->assertForbidden();
+    $this->getJson('/api/reports/visits/export')->assertForbidden();
+    $this->getJson('/api/reports/visits/pdf')->assertForbidden();
+    $this->getJson('/api/reports/vessels')->assertForbidden();
+    $this->getJson('/api/reports/vessels/export')->assertForbidden();
+
+    // Legacy report aliases
+    $this->getJson('/api/visits/history')->assertForbidden();
+    $this->getJson('/api/visits/export')->assertForbidden();
+    $this->getJson('/api/visits/export-pdf')->assertForbidden();
+});
+
+it('allows supervisor and administrator full access to vessel arrivals, reports, and aliases', function () {
+    actingAsSupervisor();
+
+    $this->getJson('/api/vessel-arrivals')->assertOk();
+    $this->getJson('/api/reports/visits')->assertOk();
+    $this->getJson('/api/reports/vessels')->assertOk();
+    $this->getJson('/api/visits/history')->assertOk();
+
+    actingAsAdmin();
+
+    $this->getJson('/api/vessel-arrivals')->assertOk();
+    $this->getJson('/api/reports/visits')->assertOk();
+    $this->getJson('/api/reports/vessels')->assertOk();
+    $this->getJson('/api/visits/history')->assertOk();
+});

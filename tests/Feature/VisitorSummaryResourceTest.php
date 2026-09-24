@@ -51,8 +51,8 @@ it('finds a visitor by a punctuated number through check-ktp', function () {
 
     $this->getJson('/api/visitors/check-ktp/3210-0000-0000-0321')
         ->assertOk()
-        ->assertJsonPath('id', $visitor->id)
-        ->assertJsonMissingPath('phone');
+        ->assertJsonPath('data.id', $visitor->id)
+        ->assertJsonMissingPath('data.phone');
 });
 
 it('lists visitors with number, type and visit count but without the profile', function () {
@@ -80,4 +80,26 @@ it('returns the summary after an update', function () {
 
     expect($response->json('visitor.name'))->toBe('Summary Renamed');
     expect($response->getContent())->not->toContain('PRIVATE-');
+});
+
+it('sends a missing birth date as null', function () {
+    Visitor::factory()->create(['id_number' => '3210000000000901']);
+
+    $this->getJson('/api/visitors/check-ktp/3210000000000901')
+        ->assertOk()
+        ->assertJsonPath('data.birth_date', null);
+});
+
+it('leaves the visit count out of check-ktp and the check-in search', function () {
+    Visitor::factory()->create(['id_number' => '3210000000000902', 'name' => 'Sample Counted']);
+
+    expect($this->getJson('/api/visitors/check-ktp/3210000000000902')->json('data'))->not->toHaveKey('visits_count')
+        ->and($this->getJson('/api/visits/search?q=Sample Counted')->json('0'))->not->toHaveKey('visits_count');
+});
+
+it('returns data null with 200 when check-ktp does not find the visitor', function () {
+    $response = $this->getJson('/api/visitors/check-ktp/9999999999999999');
+
+    $response->assertOk()
+        ->assertExactJson(['data' => null]);
 });

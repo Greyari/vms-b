@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Location;
 use App\Models\Staff;
 use App\Models\VehicleCard;
 use App\Models\Visit;
@@ -16,12 +17,14 @@ function createActiveVisit(string $idNumber = '3210000000000900'): array
     $staff = Staff::factory()->create();
     $card = VisitorCard::factory()->create();
     $vehicle = VehicleCard::factory()->create();
+    $location = Location::factory()->create();
 
     $response = test()->postJson('/api/visits', [
         'id_type' => 'ktp',
         'id_number' => $idNumber,
         'name' => 'Life Cycle',
         'staff_id' => $staff->id,
+        'location_id' => $location->id,
         'card_ids' => [$card->id],
         'vehicle_card_id' => $vehicle->id,
         'purpose' => 'Meeting',
