@@ -1,0 +1,139 @@
+<?php
+
+namespace App\Console\Commands;
+
+use App\Enums\ImportSource;
+use App\Models\ActivityLog;
+use App\Models\VisitorCard;
+use App\Services\Import\ImportReport;
+use App\Services\Import\MappingManager;
+use App\Services\Import\PilotImporter;
+use App\Services\Import\VmsOldImporter;
+use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\File;
+
+class ImportCommand extends Command
+{
+    /**
+     * The name and signature of the console command.
+     *
+     * @var string
+     */
+    protected $signature = 'vms:import
+                            {--source= : Source data to import (vms-old or pilot)}
+                            {--path= : Path to data folder containing CSV files and manifest.json}
+                            {--dry-run : Simulate import without persisting changes}';
+
+    /**
+     * The console command description.
+     *
+     * @var string
+     */
+    protected $description = 'Import VMS-old or Pilot dataset into PostgreSQL database';
+
+    /**
+     * Execute the console command.
+     */
+    public function handle(): int
+    {
+        $source = $this->option('source');
+        if (! in_array($source, ['vms-old', 'pilot'], true)) {
+            $this->error('The --source option must be either [vms-old] or [pilot].');
+
+            return 1;
+        }
+
+        $path = $this->option('path');
+        if (! $path || ! File::isDirectory($path)) {
+            $this->error("Directory not found at path: [{$path}].");
+
+            return 1;
+        }
+
+        $manifestPath = $path.DIRECTORY_SEPARATOR.'manifest.json';
+        if (! File::exists($manifestPath)) {
+            $this->error("manifest.json not found in [{$path}].");
+
+            return 1;
+        }
+
+        $dryRun = (bool) $this->option('dry-run');
+        if ($dryRun) {
+            $this->warn('Running in DRY-RUN mode. No changes will be written to database.');
+        }
+
+        $mappingManager = new MappingManager;
+        $report = new ImportReport;
+
+        $this->info("Starting import from [{$source}] at [{$path}]...");
+
+        if ($source === 'vms-old') {
+            $importer = new VmsOldImporter($mappingManager, $report);
+            $importer->import($path, $dryRun);
+        } else {
+            $importer = new PilotImporter($mappingManager, $report);
+            $importer->import($path, $dryRun);
+        }
+
+        // Synchronize card status: in_use for cards on open visits, available for all others
+        if (! $dryRun) {
+            $inUseCardIds = DB::table('visit_visitor_card')
+                ->join('visits', 'visit_visitor_card.visit_id', '=', 'visits.id')
+                ->whereNull('visits.checked_out_at')
+                ->distinct()
+                ->pluck('visit_visitor_card.visitor_card_id')
+                ->all();
+
+            if (! empty($inUseCardIds)) {
+                VisitorCard::whereIn('id', $inUseCardIds)->update(['status' => 'in_use']);
+            }
+            VisitorCard::whereNotIn('id', $inUseCardIds)->update(['status' => 'available']);
+
+            // Create single summary activity log
+            ActivityLog::create([
+                'action' => 'data_import',
+                'subject_type' => 'import',
+                'subject_id' => $source,
+                'subject_label' => "Import {$source}",
+                'new_values' => $report->toArray()['summary'],
+                'created_at' => now(),
+            ]);
+        }
+
+        $reportPath = $report->saveJsonReport(
+            $source === 'vms-old' ? ImportSource::VmsOld : ImportSource::Pilot
+        );
+        $this->info("Import report saved to: [{$reportPath}]");
+
+        $summary = $report->toArray();
+        $this->table(
+            ['Metric', 'Total'],
+            [
+                ['Total Read', $summary['summary']['total_read']],
+                ['Total Inserted', $summary['summary']['total_inserted']],
+                ['Total Updated', $summary['summary']['total_updated']],
+                ['Total Skipped', $summary['summary']['total_skipped']],
+            ]
+        );
+
+        $entityRows = [];
+        foreach ($summary['entities'] as $entity => $stats) {
+            $entityRows[] = [
+                $entity,
+                $stats['read'],
+                $stats['inserted'],
+                $stats['updated'],
+                $stats['skipped']['total'],
+            ];
+        }
+
+        if (! empty($entityRows)) {
+            $this->table(['Entity', 'Read', 'Inserted', 'Updated', 'Skipped'], $entityRows);
+        }
+
+        $this->info('Import finished successfully.');
+
+        return 0;
+    }
+}
