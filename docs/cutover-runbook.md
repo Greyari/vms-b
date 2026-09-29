@@ -69,7 +69,7 @@ Tanggal malam ASL ditetapkan owner setelah CIS lolos pemantauan H+7 (§7).
 ### 3.2. Distribusi Root CA ke Seluruh PC Konter
 - [ ] Sertifikat dibuat di server (`INSTALL-GUIDE.md` §5):
   ```powershell
-  C:\VMS\app\tools\windows\setup-ca.ps1 -ServerIp "<IP-server>" -Hostname "<nama-host>.local"
+  C:\VMS\app\tools\windows\setup-ca.ps1 -ServerIp "<IP-server>" -Hostname "vms.<yard>.local" -Organization "<nama PT yard>"
   ```
 - [ ] `import-root-ca.bat` dijalankan sebagai Administrator di setiap PC konter.
 - [ ] Browser konter membuka `https://<IP-server>/` tanpa peringatan sertifikat.

@@ -217,7 +217,10 @@ foreach ($tool in @('pg_dump', 'pg_restore', $PhpExe)) {
 $newDir = Join-Path $ReleasesDir "new-$stamp"
 Write-Step "Extracting $ReleaseZip to $newDir"
 Expand-Archive -LiteralPath $ReleaseZip -DestinationPath $newDir -Force
-if (-not (Test-Path -LiteralPath (Join-Path $newDir 'artisan'))) { throw "The ZIP holds no artisan at its root - not a VMS release." }
+if (-not (Test-Path -LiteralPath (Join-Path $newDir 'artisan'))) {
+    Remove-Item -LiteralPath $newDir -Recurse -Force -ErrorAction SilentlyContinue
+    throw "The ZIP holds no artisan at its root - not a VMS release. Nothing was changed. Use the vms-release-<version>.zip that build-release.ps1 writes, never a zipped staging_* folder."
+}
 Copy-Item -LiteralPath (Join-Path $AppDir '.env') -Destination (Join-Path $newDir '.env') -Force
 # The yard logo (decision PE-7) lives outside the release, like .env. Copied, not moved, so a rollback
 # to the previous folder still finds its own copy.

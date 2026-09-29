@@ -13,7 +13,7 @@ tokens, not Passport). It runs offline on one Windows PC per yard; the React SPA
 
 | Path | What |
 |---|---|
-| `tools/windows/` | Windows server package: Apache/PHP config, `setup-ca.ps1`, `setup-pgpass.ps1`, `build-release.ps1`, `deploy.ps1`, backup task, sync task, NTP, `export-vms-old.ps1`, cutover rehearsal (`-Yard CIS\|ASL`) and SLA audit, `INSTALL-GUIDE.md`. Moved into the repo 2026-09-28 (B-2). |
+| `tools/windows/` | Windows server package: Apache/PHP config, `setup-ca.ps1`, `setup-pgpass.ps1`, `setup-runner-account.ps1` (runner account `svc-vms-runner`, OPS-6), `build-release.ps1`, `deploy.ps1`, backup task, sync task, NTP, `export-vms-old.ps1`, cutover rehearsal (`-Yard CIS\|ASL`) and SLA audit, `INSTALL-GUIDE.md`. Moved into the repo 2026-09-28 (B-2). |
 | `docs/cutover-runbook.md` | Night-cutover runbook for two targets, CIS first then ASL (revised 2026-09-29, PE-8). |
 | `.github/workflows/quality.yml` | Audit, Pint, tests on SQLite **and** on PostgreSQL 18 (job `postgres`). |
 | `.github/workflows/deploy-onprem.yml` | On-prem deploy (roadmap step 9, 2026-09-29): `workflow_dispatch` only, input yard `cis`/`asl`, `production` only, needs a green Quality run for the SHA; builds on `windows-latest`, deploys on the self-hosted runner labelled `yard-<yard>`. Reads the SPA with the read-only deploy key in secret `VMS_WEB_REACT_DEPLOY_KEY` (OPS-3-KEY, rotate yearly). |

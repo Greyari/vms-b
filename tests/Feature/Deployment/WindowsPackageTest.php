@@ -27,7 +27,10 @@ class WindowsPackageTest extends TestCase
         $this->assertStringContainsString('<VirtualHost *:80>', $content);
         $this->assertStringContainsString('Redirect permanent / https://', $content);
 
-        // 2. Port 443 VirtualHost and SSL Directives
+        // 2. Port 443 VirtualHost and SSL Directives. Apache Lounge's httpd.conf only has `Listen 80`
+        //    (its `Listen 443` lives in extra/httpd-ssl.conf, which the install guide does not include),
+        //    so without this line nothing ever answers on 443 (CIS server, 2026-09-30).
+        $this->assertMatchesRegularExpression('/^Listen 443$/m', $content);
         $this->assertStringContainsString('<VirtualHost *:443>', $content);
         $this->assertStringContainsString('SSLEngine on', $content);
         $this->assertStringContainsString('SSLCertificateFile "C:/VMS/certs/vms-server.crt"', $content);
@@ -99,6 +102,67 @@ class WindowsPackageTest extends TestCase
         $this->assertStringContainsString('vms-server.crt', $content);
         $this->assertStringContainsString('subjectAltName', $content);
         $this->assertStringContainsString('certutil', $content);
+    }
+
+    /**
+     * CIS server, 2026-09-30: the root CA was constrained to `.asl.local` whatever -Hostname said, so
+     * `-Hostname vms.cis.local` produced a server certificate its own root forbids ("permitted subtree
+     * violation") and Edge refused it as NET::ERR_CERT_INVALID. This runs the real script with openssl.
+     */
+    public function test_setup_ca_issues_a_chain_its_own_root_accepts_for_any_yard_host(): void
+    {
+        $binary = PowerShell::binary();
+        $openssl = $this->openSslBinary();
+        if ($binary === null || $openssl === null) {
+            $this->markTestSkipped('Needs PowerShell and openssl.');
+        }
+
+        $dir = sys_get_temp_dir().DIRECTORY_SEPARATOR.'vms-ca-'.uniqid();
+        try {
+            $command = escapeshellarg($binary).' -NoProfile -NonInteractive -ExecutionPolicy Bypass -File '
+                .escapeshellarg($this->toolsDir.DIRECTORY_SEPARATOR.'setup-ca.ps1')
+                .' -ServerIp 192.168.50.100 -Hostname vms.cis.local -Organization '.escapeshellarg('PT Cemara Intan Shipyard')
+                .' -OutputDir '.escapeshellarg($dir).' -OpenSslPath '.escapeshellarg($openssl).' -Force 2>&1';
+            exec($command, $output, $code);
+            $this->assertSame(0, $code, implode("\n", $output));
+
+            $root = $dir.DIRECTORY_SEPARATOR.'vms-root-ca.crt';
+            $server = $dir.DIRECTORY_SEPARATOR.'vms-server.crt';
+            exec(escapeshellarg($openssl).' verify -CAfile '.escapeshellarg($root).' '.escapeshellarg($server).' 2>&1', $verify, $verifyCode);
+            $this->assertSame(0, $verifyCode, implode("\n", $verify));
+
+            exec(escapeshellarg($openssl).' x509 -in '.escapeshellarg($root).' -noout -subject -ext nameConstraints 2>&1', $rootText);
+            $rootText = implode("\n", $rootText);
+            $this->assertStringContainsString('DNS:vms.cis.local', $rootText);
+            $this->assertStringNotContainsString('asl.local', $rootText);
+            $this->assertStringContainsString('PT Cemara Intan Shipyard', $rootText);
+
+            $bat = File::get($dir.DIRECTORY_SEPARATOR.'import-root-ca.bat');
+            $this->assertStringContainsString('certutil -delstore Root "VMS Internal Root CA"', $bat);
+            $this->assertStringContainsString('certutil -addstore -f Root', $bat);
+        } finally {
+            File::deleteDirectory($dir);
+        }
+    }
+
+    private function openSslBinary(): ?string
+    {
+        $candidates = array_filter([getenv('OPENSSL_BIN') ?: null, 'openssl']);
+        foreach ($candidates as $candidate) {
+            $probe = PHP_OS_FAMILY === 'Windows' ? "where {$candidate} 2>NUL" : "command -v {$candidate} 2>/dev/null";
+            $found = [];
+            exec($probe, $found, $code);
+            if ($code === 0 && isset($found[0])) {
+                return trim($found[0]);
+            }
+        }
+        foreach (['C:\Program Files\Git\mingw64\bin\openssl.exe', 'C:\VMS\Apache24\bin\openssl.exe'] as $path) {
+            if (PHP_OS_FAMILY === 'Windows' && is_file($path)) {
+                return $path;
+            }
+        }
+
+        return null;
     }
 
     public function test_build_release_script_exists_and_has_valid_syntax(): void
@@ -281,6 +345,26 @@ class WindowsPackageTest extends TestCase
         $this->assertStringContainsString('-Fc -w -U $DbUser', $backup);
         $this->assertStringNotContainsString('cmd /c', $backup); // breaks on "C:\Program Files\..."
         $this->assertStringNotContainsString("'--no-owner'", $deploy); // restored tables stay vms_app's
+    }
+
+    /**
+     * Decisions OPS-6 + SEC-8: the runner service logs on as a dedicated non-admin account with only what
+     * deploy.ps1 needs, and is registered on the backend repository, never on the organization.
+     */
+    public function test_runner_account_follows_ops_6_and_sec_8(): void
+    {
+        $script = File::get($this->toolsDir.DIRECTORY_SEPARATOR.'setup-runner-account.ps1');
+
+        $this->assertStringContainsString("\$Account = 'svc-vms-runner'", $script);
+        $this->assertStringContainsString('Read-Host -AsSecureString', $script);          // no password on a command line
+        $this->assertStringContainsString("SecurityIdentifier('S-1-5-32-544')", $script);  // refuses an administrator account
+        $this->assertStringContainsString('(OI)(CI)M', $script);                          // C:\VMS
+        $this->assertStringContainsString('(OI)(CI)R', $script);                          // C:\VMS\secrets, read only
+        $this->assertStringContainsString('sc.exe sdset', $script);                       // start/stop VMS-Apache
+        $this->assertStringContainsString('--url https://github.com/INIT-ASL/VMS-backend-laravel', $script);
+        $this->assertStringContainsString('--labels yard-$Yard', $script);
+        $this->assertStringNotContainsString('--url https://github.com/INIT-ASL ', $script);
+        $this->assertStringNotContainsString('--windowslogonpassword', $script);
     }
 
     /** The sync task works inside C:\VMS\app every minute; deploy pauses it around the folder swap. */

@@ -102,6 +102,9 @@ server saja, dan password PostgreSQL **unik per server**.
        ```apache
        Include conf/extra/httpd-vms.conf
        ```
+     - **Jangan** meng-uncomment `Include conf/extra/httpd-ssl.conf`: `httpd-vms.conf` sudah membawa `Listen 443`
+       dan VirtualHost 443-nya sendiri; `Listen 443` kedua membuat Apache gagal start.
+     - Uji sintaks sebelum memasang service: `C:\VMS\Apache24\bin\httpd.exe -t` harus menjawab `Syntax OK`.
 4. **Daftarkan Service Apache:**
    - Buka PowerShell sebagai Administrator:
      ```powershell
@@ -139,8 +142,14 @@ server saja, dan password PostgreSQL **unik per server**.
 1. **Jalankan Generator Sertifikat** (setelah §7 langkah 2, karena skrip ikut di paket rilis):
    ```powershell
    cd C:\VMS\app\tools\windows
-   .\setup-ca.ps1 -ServerIp "<IP-server>" -Hostname "<nama-host>.local" -OutputDir "C:\VMS\certs" -OpenSslPath "C:\VMS\Apache24\bin\openssl.exe"
+   .\setup-ca.ps1 -ServerIp "<IP-server>" -Hostname "vms.<yard>.local" -Organization "<nama PT yard ini>" -OutputDir "C:\VMS\certs" -OpenSslPath "C:\VMS\Apache24\bin\openssl.exe"
    ```
+   Contoh CIS: `-Hostname "vms.cis.local" -Organization "PT Cemara Intan Shipyard"`. Root CA hanya sah untuk
+   `-Hostname` itu, `localhost`, dan IP privat (sejak 2026-09-30; sebelumnya di-hard-code `.asl.local`, sehingga
+   server CIS mendapat `NET::ERR_CERT_INVALID`). Skrip memverifikasi rantainya sendiri dan berhenti bila gagal.
+   **Setiap `-Force` membuat Root CA baru**: `import-root-ca.bat` yang baru wajib dijalankan ulang di server dan di
+   semua PC konter (skrip itu menghapus root VMS lama lebih dulu), lalu `Restart-Service VMS-Apache` dan tutup semua
+   jendela browser. Sampai itu browser menjawab `NET::ERR_CERT_AUTHORITY_INVALID`.
 2. **Hasil Berkas:**
    - `C:\VMS\certs\vms-root-ca.crt` (Root CA publik).
    - `C:\VMS\certs\vms-root-ca.key` (Kunci privat Root CA — pindahkan ke flashdisk IT offline setelah selesai!).
@@ -247,13 +256,25 @@ lama). Server baru dipasang begini, dari PowerShell Administrator:
    nama berkasnya.
 6. `Start-Service VMS-Apache`, lalu `curl.exe -k https://127.0.0.1/api/health-db` harus menjawab `{"status":"ok"}`.
 
+   Bila curl menjawab `(7) Failed to connect to 127.0.0.1 port 443`, tidak ada yang mendengarkan di 443:
+   - `Get-Service VMS-Apache` harus `Running`; bila tidak, `C:\VMS\Apache24\bin\httpd.exe -t` menyebut baris yang
+     salah, dan `C:\VMS\Apache24\logs\error.log` menyebut sebab gagal start.
+   - `netstat -ano | findstr ":443"` harus menunjukkan `LISTENING`. Bila Apache jalan tetapi 443 tidak ada,
+     `httpd-vms.conf` di server adalah salinan lama tanpa `Listen 443` (diperbaiki 2026-09-30) — salin ulang dari
+     paket rilis, lalu `Restart-Service VMS-Apache`.
+
 ### Deployment berikutnya
 Folder `C:\VMS\app` dipindah saat deploy, jadi `deploy.ps1` dijalankan dari salinannya di luar folder itu
 (skrip menolak jalan dari dalam `C:\VMS\app`):
 ```powershell
+Set-Location C:\VMS
 Copy-Item C:\VMS\app\tools\windows\deploy.ps1 C:\VMS\tools\deploy.ps1 -Force
 C:\VMS\tools\deploy.ps1 -ReleaseZip "C:\VMS\releases\vms-release-<versi>.zip"
 ```
+`Set-Location C:\VMS` wajib: jendela PowerShell yang berdiri di dalam `C:\VMS\app` (mis. `C:\VMS\app\tools\windows`)
+mengunci folder itu, dan penukaran folder gagal. ZIP yang dipakai selalu `vms-release-<versi>.zip` dari
+`build-release.ps1` — cocokkan `(Get-FileHash <zip>).Hash` dengan `sha256` di `release-manifest-<versi>.json`. Jangan
+pernah meng-zip folder `staging_*` (folder kerja sementara build; tanpa `vendor`, dan `artisan` tidak di akar ZIP).
 Urutannya (OPS-5): ekstrak ke folder baru + bawa `.env` dan `public\branding\` → `artisan down` → `pg_dump`
 wajib sukses → jeda task `VMS-Cloud-Sync` → tukar folder → migrate → cache → start Apache → probe
 `GET https://127.0.0.1/api/health-db` 6 kali tiap 5 detik → `artisan up`. Gagal di langkah mana pun setelah
