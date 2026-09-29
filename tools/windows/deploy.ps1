@@ -152,23 +152,30 @@ function Start-Apache {
     if ((Get-Service -Name $ServiceName).Status -ne 'Running') { throw "$ServiceName did not reach Running." }
 }
 
+# curl.exe (built into Windows 10/11), not Invoke-RestMethod: the yard CA is trusted on the counters, not
+# necessarily by the account running this, and under Windows PowerShell 5.1 a certificate callback script block
+# runs on a thread without a runspace - every probe failed with "An unexpected error occurred on a send" and a
+# healthy deploy was rolled back (CIS, 2026-09-30). -k skips only the trust check of our own localhost cert.
 function Test-Health {
     for ($attempt = 1; $attempt -le $ProbeAttempts; $attempt++) {
+        $previous = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
         try {
-            if ($PSVersionTable.PSVersion.Major -ge 6) {
-                $response = Invoke-RestMethod -Uri $HealthUrl -TimeoutSec 10 -SkipCertificateCheck
-            } else {
-                # The yard CA is trusted on the counters, not necessarily by this PowerShell session.
-                [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
-                $response = Invoke-RestMethod -Uri $HealthUrl -TimeoutSec 10
-            }
-            if ($response.status -eq 'ok') {
-                Write-Host "   health-db ok (attempt $attempt)" -ForegroundColor Green
-                return $true
-            }
-        } catch {
-            Write-Host "   attempt ${attempt}: $($_.Exception.Message)" -ForegroundColor DarkYellow
+            $body = (& 'curl.exe' @('-k', '-s', '-S', '--max-time', '10', $HealthUrl) 2>&1 | ForEach-Object { "$_" }) -join "`n"
+            $curlExit = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previous
         }
+        $status = $null
+        if ($curlExit -eq 0) {
+            try { $status = ($body | ConvertFrom-Json).status } catch { $status = $null }
+        }
+        if ($status -eq 'ok') {
+            Write-Host "   health-db ok (attempt $attempt)" -ForegroundColor Green
+            return $true
+        }
+        $detail = if ($body.Length -gt 200) { $body.Substring(0, 200) } else { $body }
+        Write-Host "   attempt ${attempt}: curl exit $curlExit - $detail" -ForegroundColor DarkYellow
         Start-Sleep -Seconds $ProbeIntervalSeconds
     }
     return $false

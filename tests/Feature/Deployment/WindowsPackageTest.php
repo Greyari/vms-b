@@ -327,6 +327,13 @@ class WindowsPackageTest extends TestCase
         $this->assertStringContainsString("Initialize-Storage (Join-Path \$AppDir 'storage')", $content);
         $this->assertStringContainsString("'framework\\views'", $content);
         $this->assertStringContainsString('php artisan down failed - deploy stopped, nothing changed.', $content);
+
+        // CIS, 2026-09-30: under Windows PowerShell 5.1 the `ServerCertificateValidationCallback = { $true }`
+        // script block runs on a thread without a runspace, every probe failed with "An unexpected error occurred
+        // on a send" and a healthy deploy was rolled back. The probe uses curl.exe -k (built into Windows 10/11).
+        $this->assertStringNotContainsString('ServerCertificateValidationCallback', $content);
+        $this->assertStringContainsString("'curl.exe'", $content);
+        $this->assertStringContainsString("'-k'", $content);
         $this->assertStringContainsString('--if-exists', $content);
     }
 
