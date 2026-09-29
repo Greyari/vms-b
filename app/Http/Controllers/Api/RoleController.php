@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Role;
 use App\Services\ActivityLogger;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class RoleController extends Controller
@@ -62,6 +63,10 @@ class RoleController extends Controller
     {
         $role = Role::findOrFail($id);
 
+        if ($role->is_builtin) {
+            return $this->refuseBuiltIn();
+        }
+
         $validated = $request->validate([
             'name' => 'required|string|max:255|unique:roles,name,'.$role->id,
             'permissions' => 'nullable|array',
@@ -98,8 +103,19 @@ class RoleController extends Controller
     public function destroy(string $id)
     {
         $role = Role::findOrFail($id);
+
+        if ($role->is_builtin) {
+            return $this->refuseBuiltIn();
+        }
+
         $role->delete();
 
         return response()->json(['message' => 'Role deleted successfully']);
+    }
+
+    /** See Role::BUILT_IN: the seeder would undo any change to these roles. */
+    private function refuseBuiltIn(): JsonResponse
+    {
+        return response()->json(['message' => 'Built-in roles cannot be changed or deleted.'], 422);
     }
 }

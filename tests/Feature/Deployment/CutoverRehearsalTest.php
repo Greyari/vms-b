@@ -12,7 +12,7 @@ class CutoverRehearsalTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->toolsDir = base_path('../tools/windows');
+        $this->toolsDir = base_path('tools'.DIRECTORY_SEPARATOR.'windows');
     }
 
     public function test_rehearse_cutover_script_exists_and_has_valid_syntax(): void
@@ -30,14 +30,7 @@ class CutoverRehearsalTest extends TestCase
         $this->assertStringContainsString('vms:import-verify', $content);
         $this->assertStringContainsString('-Since', $content);
         $this->assertStringContainsString('rehearsal-summary', $content);
-
-        // Verify PowerShell syntax parser
-        $escapedPath = addslashes($scriptPath);
-        $command = "powershell -NoProfile -Command \"\$err = \$null; [System.Management.Automation.Language.Parser]::ParseFile('{$escapedPath}', [ref]\$null, [ref]\$err) | Out-Null; if (\$err) { exit 1 } else { exit 0 }\"";
-        $exitCode = 1;
-        $output = [];
-        exec($command, $output, $exitCode);
-        $this->assertSame(0, $exitCode, 'rehearse-cutover.ps1 has PowerShell syntax errors: '.implode("\n", $output));
+        // Syntax of every script is checked once, in WindowsPackageTest.
     }
 
     public function test_audit_performance_script_exists_and_has_valid_syntax(): void
@@ -55,19 +48,11 @@ class CutoverRehearsalTest extends TestCase
         $this->assertStringContainsString('30000', $content); // SLA < 30000 ms excel export
         $this->assertStringContainsString('/api/visitors/check-ktp', $content);
         $this->assertStringContainsString('/api/reports/visits', $content);
-
-        // Verify PowerShell syntax parser
-        $escapedPath = addslashes($scriptPath);
-        $command = "powershell -NoProfile -Command \"\$err = \$null; [System.Management.Automation.Language.Parser]::ParseFile('{$escapedPath}', [ref]\$null, [ref]\$err) | Out-Null; if (\$err) { exit 1 } else { exit 0 }\"";
-        $exitCode = 1;
-        $output = [];
-        exec($command, $output, $exitCode);
-        $this->assertSame(0, $exitCode, 'audit-performance.ps1 has PowerShell syntax errors: '.implode("\n", $output));
     }
 
     public function test_cutover_runbook_exists_and_contains_required_sections(): void
     {
-        $runbookPath = base_path('../docs/cutover-runbook.md');
+        $runbookPath = base_path('docs'.DIRECTORY_SEPARATOR.'cutover-runbook.md');
         $this->assertTrue(File::exists($runbookPath), "cutover-runbook.md not found at: {$runbookPath}");
 
         $content = File::get($runbookPath);

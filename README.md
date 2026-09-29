@@ -1,58 +1,58 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# VMS — Backend Gerbang
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+API visitor management galangan (ASL dan CIS): registrasi dan check-in/check-out visitor, kartu visitor dan
+kendaraan, blacklist lokal, cetak pass, crew arrival, laporan. Laravel 13 · PHP 8.4 · PostgreSQL 18 ·
+Sanctum + spatie-permission.
 
-## About Laravel
+Gerbang berjalan **offline di satu PC Windows per yard**; SPA (`VMS-web-react`) dibangun ke `public/` dan
+dilayani dari origin yang sama. Arah program (hub cloud untuk pra-registrasi dan blacklist global) ada di
+`D:\INIT-ASL\docs\decisions\vms-hybrid-decisions.md` (otoritatif) dan roadmap
+`D:\INIT-ASL\docs\superpowers\plans\2026-09-25-vms-hybrid-azure-multiyard-plan.md`.
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+## Setup lokal
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
-
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
-
-## Learning Laravel
-
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
-
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
-
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
-
-## Agentic Development
-
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+Prasyarat: PHP 8.4 (ekstensi `pdo_pgsql`, `intl`, `zip`, `gd`, `mbstring`), Composer, PostgreSQL 18
+(di laptop dev: container `postgres-lokal`).
 
 ```bash
-composer require laravel/boost --dev
-
-php artisan boost:install
+composer install
+cp .env.example .env        # isi DB_PASSWORD dan VMS_ADMIN_PASSWORD
+php artisan key:generate
+php artisan migrate --seed
+php artisan serve --port=8003
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+Akun awal: `VMS_ADMIN_EMAIL` (default `admin@vms.local`) dengan password dari `.env`.
 
-## Contributing
+## Test
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+```bash
+php artisan test                                                        # SQLite in-memory
+DB_CONNECTION=pgsql DB_DATABASE=vms_test DB_PASSWORD=<lokal> php artisan test   # PostgreSQL 18
+./vendor/bin/pint --test
+```
 
-## Code of Conduct
+CI (`.github/workflows/quality.yml`) menjalankan `composer audit`, Pint, suite SQLite, dan suite PostgreSQL 18.
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+## Paket server Windows
 
-## Security Vulnerabilities
+`tools/windows/` berisi semua yang dipasang di PC server yard: konfigurasi Apache/PHP, CA internal
+(`setup-ca.ps1`), paket rilis (`build-release.ps1`), deploy + rollback (`deploy.ps1`), backup harian, ekspor
+VMS-old, latihan cutover, audit SLA, dan `INSTALL-GUIDE.md`. Runbook malam cutover: `docs/cutover-runbook.md`.
+Status: kode ada, **belum diverifikasi di PC target maupun data asli**; `deploy.ps1` dan runbook cutover masih
+direvisi (roadmap hybrid langkah 4).
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+```powershell
+powershell .\tools\windows\build-release.ps1 -OutputDir release   # default: VMS-web-react di sebelah repo ini
+```
 
-## License
+## Deploy
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+- **On-prem (target):** paket ZIP dari `build-release.ps1`, dipasang `deploy.ps1` di PC server; nanti lewat
+  workflow `deploy-onprem.yml` yang dipicu manual (roadmap hybrid langkah 9).
+- **Azure (dipensiunkan 2026-09-28):** `.github/workflows/deploy.yml` sudah dimatikan; push ke `production` tidak
+  men-deploy apa pun. Jangan diaktifkan lagi — App Service-nya kini milik Cloud Hub.
+
+## Git
+
+Commit, push, dan perubahan index dikerjakan owner.

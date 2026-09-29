@@ -1,0 +1,9 @@
+[
+  {"input": "3210-0000 0000 0001", "expected": "3210000000000001", "note": "KTP typed with dashes and spaces"},
+  {"input": " a1234567 ", "expected": "A1234567", "note": "passport with padding, lower case"},
+  {"input": "b 12-34\t56", "expected": "B123456", "note": "tab counts as whitespace"},
+  {"input": "C--1  2", "expected": "C12", "note": "runs of dashes and spaces collapse"},
+  {"input": "ABC123", "expected": "ABC123", "note": "already normal"},
+  {"input": "", "expected": "", "note": "empty stays empty"},
+  {"input": null, "expected": "", "note": "null becomes empty"}
+]

@@ -162,8 +162,15 @@ class ImportVerifyCommand extends Command
         }
 
         if (Visit::count() > 0) {
-            $monthlyCount = Visit::selectRaw('substr(date, 1, 7) as month, count(*) as count')
-                ->groupBy('month')
+            // One row per calendar month. The expression differs per driver: PostgreSQL has no
+            // substr() for a date column, and grouping by a select alias is not portable either
+            // (count() drops the alias; SQLite then groups by the string literal "month").
+            $month = DB::connection()->getDriverName() === 'pgsql'
+                ? "to_char(date, 'YYYY-MM')"
+                : 'substr(date, 1, 7)';
+
+            $monthlyCount = DB::query()
+                ->fromSub(Visit::query()->selectRaw("{$month} as month")->groupByRaw($month), 'months')
                 ->count();
 
             if ($monthlyCount === 0) {

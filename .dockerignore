@@ -21,3 +21,6 @@ tests
 Dockerfile
 docker-compose*.yml
 bootstrap/cache/*
+# Paket server Windows dan runbook - tidak dipakai di image container
+tools
+docs

@@ -56,11 +56,74 @@ jobs:
       - name: Format (Pint)
         run: ./vendor/bin/pint --test
 
-      # Suite ini berjalan di SQLite in-memory (lihat phpunit.xml), sementara
-      # produksi memakai PostgreSQL 18. Itu perbedaan yang perlu disadari:
-      # perilaku khas Postgres — ilike, jsonb, timestamptz — tidak tercakup di
-      # sini. Menambahkan suite Integration ber-PostgreSQL adalah langkah
-      # berikutnya yang wajar, bukan sesuatu yang bisa dipura-pura sudah ada
-      # dengan memasang service database yang tidak dipakai suite mana pun.
+      # Runner tidak punya .env. Tanpa APP_KEY, route SPA (grup `web`, cookie
+      # terenkripsi) melempar MissingAppKeyException — penyebab Quality merah sejak
+      # 5be0f89 (2026-09-16). Kunci dibuat per run dan tidak disimpan di mana pun.
+      - name: Generate a throwaway APP_KEY
+        run: echo "APP_KEY=base64:$(openssl rand -base64 32)" >> "$GITHUB_ENV"
+
+      # Suite ini berjalan di SQLite in-memory (lihat phpunit.xml). Perilaku khas
+      # PostgreSQL diuji job `postgres` di bawah, yang menjalankan suite yang sama
+      # di PG 18. REQUIRE_POWERSHELL membuat cek sintaks paket Windows gagal, bukan
+      # ter-skip diam-diam, kalau pwsh hilang dari runner.
       - name: Unit + Feature
+        env:
+          REQUIRE_POWERSHELL: "1"
+        run: php artisan test
+
+  postgres:
+    name: Tests on PostgreSQL 18
+    runs-on: ubuntu-latest
+
+    # Produksi di PC yard dan dev (postgres-lokal) sama-sama PG 18. Suite ini
+    # juga menjalankan test grup `pgsql` (advisory lock, EXPLAIN, migrasi) yang
+    # di-skip di SQLite — dan menangkap SQL yang hanya lolos di SQLite: pada
+    # 2026-09-28 `vms:import-verify` ternyata gagal di PG karena group-by alias.
+    # Password di bawah hanya hidup di container sekali pakai milik runner.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: vms_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    env:
+      DB_CONNECTION: pgsql
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      DB_DATABASE: vms_test
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+      REQUIRE_POWERSHELL: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          extensions: pdo_pgsql, pgsql, mbstring, gd, bcmath, intl, zip
+          coverage: none
+
+      - name: Cache Composer
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/composer/files
+          key: composer-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-
+
+      - run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Generate a throwaway APP_KEY
+        run: echo "APP_KEY=base64:$(openssl rand -base64 32)" >> "$GITHUB_ENV"
+
+      - name: Unit + Feature on PostgreSQL 18
         run: php artisan test

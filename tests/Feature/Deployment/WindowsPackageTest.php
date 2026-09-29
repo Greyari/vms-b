@@ -3,6 +3,7 @@
 namespace Tests\Feature\Deployment;
 
 use Illuminate\Support\Facades\File;
+use Tests\Support\PowerShell;
 use Tests\TestCase;
 
 class WindowsPackageTest extends TestCase
@@ -12,7 +13,7 @@ class WindowsPackageTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->toolsDir = dirname(base_path()).DIRECTORY_SEPARATOR.'tools'.DIRECTORY_SEPARATOR.'windows';
+        $this->toolsDir = base_path('tools'.DIRECTORY_SEPARATOR.'windows');
     }
 
     public function test_apache_configuration_template_exists_and_has_required_directives(): void
@@ -172,5 +173,31 @@ class WindowsPackageTest extends TestCase
         $this->assertStringContainsString('setup-backup-task.ps1', $content);
         $this->assertStringContainsString('NTP', $content);
         $this->assertStringContainsString('Checklist Penerimaan', $content);
+    }
+
+    public function test_every_powershell_script_in_the_package_parses(): void
+    {
+        $binary = PowerShell::binary();
+        if ($binary === null) {
+            if (getenv('REQUIRE_POWERSHELL') === '1') {
+                $this->fail('REQUIRE_POWERSHELL=1 but neither pwsh nor powershell is on PATH.');
+            }
+            $this->markTestSkipped('Neither pwsh nor powershell is on PATH.');
+        }
+
+        $scripts = glob($this->toolsDir.DIRECTORY_SEPARATOR.'*.ps1');
+        $this->assertNotEmpty($scripts, "No .ps1 files under {$this->toolsDir}");
+
+        foreach ($scripts as $script) {
+            $this->assertSame([], PowerShell::parseErrors($binary, $script), basename($script).' has PowerShell syntax errors');
+        }
+    }
+
+    public function test_build_release_takes_explicit_backend_and_frontend_folders(): void
+    {
+        $content = File::get($this->toolsDir.DIRECTORY_SEPARATOR.'build-release.ps1');
+        $this->assertStringContainsString('$BackendDir', $content);
+        $this->assertStringContainsString('$FrontendDir', $content);
+        $this->assertStringNotContainsString('Join-Path $repoRoot "VMS-backend-laravel"', $content);
     }
 }
