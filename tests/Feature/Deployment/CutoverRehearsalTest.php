@@ -33,6 +33,19 @@ class CutoverRehearsalTest extends TestCase
         // Syntax of every script is checked once, in WindowsPackageTest.
     }
 
+    /** Decision PE-8: ASL rehearses with VMS-old, CIS with the IIS pilot; never the other yard's source. */
+    public function test_rehearsal_runs_each_yard_on_its_own_source(): void
+    {
+        $content = File::get($this->toolsDir.DIRECTORY_SEPARATOR.'rehearse-cutover.ps1');
+
+        $this->assertStringContainsString("[ValidateSet('ASL', 'CIS')]", $content);
+        $this->assertStringContainsString("if (\$Yard -eq 'CIS') { 'pilot' } else { 'vms-old' }", $content);
+        $this->assertStringContainsString('-d extension=pdo_mysql artisan vms:export-pilot', $content);
+        $this->assertStringContainsString('vms:import --source=$source', $content);
+        $this->assertStringContainsString('vms:import-verify --source=$source', $content);
+        $this->assertStringNotContainsString('vms:import --source=vms-old', $content);
+    }
+
     public function test_audit_performance_script_exists_and_has_valid_syntax(): void
     {
         $scriptPath = $this->toolsDir.DIRECTORY_SEPARATOR.'audit-performance.ps1';
@@ -66,5 +79,11 @@ class CutoverRehearsalTest extends TestCase
         $this->assertStringContainsString('vms:import-verify', $content);
         $this->assertStringContainsString('14 akun', $content);
         $this->assertStringContainsString('Checklist Penerimaan', $content);
+
+        // PE-8: two targets, CIS first; the pilot never goes to the ASL server.
+        $this->assertStringContainsString('vms:import --source=pilot', $content);
+        $this->assertStringContainsString('vms:export-pilot', $content);
+        $this->assertStringContainsString('VMS_YARD_CODE', $content);
+        $this->assertStringNotContainsString('data pilot (jika ada)', $content);
     }
 }

@@ -13,10 +13,11 @@ tokens, not Passport). It runs offline on one Windows PC per yard; the React SPA
 
 | Path | What |
 |---|---|
-| `tools/windows/` | Windows server package: Apache/PHP config, `setup-ca.ps1`, `build-release.ps1`, `deploy.ps1`, backup task, `export-vms-old.ps1`, cutover rehearsal and SLA audit, `INSTALL-GUIDE.md`. Moved into the repo 2026-09-28 (B-2). |
-| `docs/cutover-runbook.md` | Night-cutover runbook (needs revising for two targets, ASL and CIS — PE-8). |
+| `tools/windows/` | Windows server package: Apache/PHP config, `setup-ca.ps1`, `setup-pgpass.ps1`, `build-release.ps1`, `deploy.ps1`, backup task, sync task, NTP, `export-vms-old.ps1`, cutover rehearsal (`-Yard CIS\|ASL`) and SLA audit, `INSTALL-GUIDE.md`. Moved into the repo 2026-09-28 (B-2). |
+| `docs/cutover-runbook.md` | Night-cutover runbook for two targets, CIS first then ASL (revised 2026-09-29, PE-8). |
 | `.github/workflows/quality.yml` | Audit, Pint, tests on SQLite **and** on PostgreSQL 18 (job `postgres`). |
-| `.github/workflows/deploy.yml` | Former Azure deploy of the gate — **disabled 2026-09-28** (step 3); kept in the tree until the on-prem workflow replaces it. |
+| `.github/workflows/deploy-onprem.yml` | On-prem deploy (roadmap step 9, 2026-09-29): `workflow_dispatch` only, input yard `cis`/`asl`, `production` only, needs a green Quality run for the SHA; builds on `windows-latest`, deploys on the self-hosted runner labelled `yard-<yard>`. Needs secret `ORG_REPO_READ_TOKEN`. |
+| `.github/workflows/deploy.yml` | Former Azure deploy of the gate — **disabled 2026-09-28** (step 3); `deploy-onprem.yml` replaces it. Deleting the file is the owner's call. |
 
 ## Git
 
@@ -29,9 +30,9 @@ the Cloud Hub (decision B-3).
 - **Nothing may need the internet at runtime** — no CDN, no external font, no outbound API, no
   cloud-only service. Mail is `log`, the queue is `sync`, and files stay on local disk.
 - **Trusted proxies come from `TRUSTED_PROXIES`** (`config/trustedproxy.php`): empty on the LAN
-  server, `*` on Azure. In Laravel 13.30 `*` trusts every address (`0.0.0.0/0`, `::/0`), so
-  `$request->ip()` is the leftmost `X-Forwarded-For` entry. The LAN server is unaffected, because
-  Apache sees the counter PCs directly.
+  server, where Apache sees the counter PCs directly. The gate no longer runs on Azure (B-3); never set
+  `*` — in Laravel 13.30 it trusts every address, making `$request->ip()` the sender-written leftmost
+  `X-Forwarded-For` entry (the cloud hub replaced it with `TRUSTED_PROXY_HOPS` for that reason).
 - **Visits are open while `checked_out_at IS NULL`** — use `Visit::open()`, never
   `whereNull('time_out')`. `time_out` is still written for older readers but cannot express a
   checkout on a later day.
@@ -107,7 +108,33 @@ the Cloud Hub (decision B-3).
   `GlobalBlacklist::activeForNumber()`, which matches the number across document types (SEC-4); only a
   `BlacklistReasonCategory` goes to the hub, `local_note` never does (SEC-6d). The 2026-09-26 draft these
   replace is archived outside the repo in `../.superpowers/sdd/archive/phase1-2026-09-26/`.
-- **`tests/Fixtures/identity-number-vectors.json` is shared with the cloud hub** (BE-1): the hub repo keeps
-  a byte-identical copy; change both together.
+- **`tests/Fixtures/identity-number-vectors.json` and `tests/Fixtures/hmac-vectors.json` are shared with the
+  cloud hub** (BE-1, SEC-1): the hub repo keeps byte-identical copies, and `App\Support\YardSignature` is the hub's
+  class verbatim; change both repos together.
+- **Cloud hub sync (roadmap step 8, 2026-09-29)**: `php artisan vms:sync-cloud-hub` (Task Scheduler every minute,
+  `tools/windows/setup-sync-task.ps1`) does nothing while `VMS_SYNC_ENABLED=false`, holds a cache lock, and
+  **always exits 0** — every hub problem goes to `sync_state_logs`, never to the counter. Outbox rows are sent
+  oldest first; 200/201/409 = done, 403/404/422 = rejected (`sent_at` + `last_error`), anything else stops the
+  push and retries next minute. `local_note` never goes on the wire (SEC-6d). The blacklist cursor (`last_seq`)
+  moves in the same transaction as the rows it covers.
+- **Check-in reads the global blacklist mirror before `firstOrCreate`** (`App\Support\GlobalBlacklistCheck`):
+  same number + same document type = 422 unless a `manage_blacklist` user sends `override_global_blacklist` with
+  a reason of 10+ characters (logged as `blacklist_override`); same number under another type = a `warnings`
+  entry, never a refusal (SEC-4). The local blacklist check runs first and cannot be overridden.
+- **Each yard imports only its own legacy data (decision PE-8, 2026-09-29):** VMS-old = ASL, the IIS pilot = CIS
+  (`App\Enums\ImportSource::yardCode()`). `vms:import` refuses the other yard's source when `VMS_YARD_CODE` is set,
+  warns when it is empty, and refuses a folder whose `manifest.json` names another source. The `pilot` connection
+  (`PILOT_DB_*`, MySQL) exists only for `vms:export-pilot` on the CIS server at cutover, run as
+  `php -d extension=pdo_mysql artisan vms:export-pilot` — until 2026-09-29 the connection was not defined at all.
+- **Per-yard branding (PE-7):** `GET /api/app-config` (public) returns `company_name`, `company_address`,
+  `logo_url` (only a basename that exists in `public/branding/`) and `yard_code` from `config('vms.branding')`
+  (`VMS_COMPANY_*`); the report PDF uses the same config. `public/branding/` is git-ignored, never shipped in the
+  release, and carried across deploys by `deploy.ps1`.
+- **`vms:sync-cloud-hub` skips while the app is in maintenance mode** — `deploy.ps1` puts it down before migrating
+  and swapping `C:\VMS\app`; a cycle must not write to a half-migrated database or hold the folder open.
+- **`deploy.ps1` refuses to run from inside `C:\VMS\app`** (the folder is moved): run a copy from `C:\VMS\tools\`,
+  or let `deploy-onprem.yml` run the release's own copy from the runner's temp folder. Dump/restore passwords come
+  only from `C:\VMS\secrets\pgpass.conf` (`setup-pgpass.ps1`, `PGPASSFILE`, always `-w`); the rollback restore
+  keeps the dump's owners (no `--no-owner`), so tables stay `vms_app`'s.
 - Legacy VMS-old column names lie: `VehicleNo` = location IMO code, `Note` = vehicle plate,
   `VisitorAddress` = nationality; the legacy blacklist is `VisitorType = 5`.

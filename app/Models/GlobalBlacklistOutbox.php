@@ -33,6 +33,14 @@ class GlobalBlacklistOutbox extends Model
     ];
 
     /**
+     * Retry bookkeeping is not an audit event: without this, every failed sync minute during an
+     * internet outage would add an activity log row per queued request.
+     *
+     * @var list<string>
+     */
+    protected array $logExcept = ['attempts', 'last_error'];
+
+    /**
      * @return array<string, string>
      */
     protected function casts(): array

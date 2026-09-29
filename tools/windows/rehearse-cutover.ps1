@@ -14,6 +14,14 @@
     7. Mengimpor delta dan memverifikasi pembaruan baris checkout & keutuhan relasi.
     8. Menghasilkan rehearsal-summary.json dan laporan markdown evaluasi cutover.
 
+    Keputusan PE-8 (2026-09-29): tiap yard hanya memuat datanya sendiri. -Yard ASL (default) memakai
+    VMS-old (SQL Server) seperti di atas. -Yard CIS memakai database MySQL pilot IIS lewat
+    `php -d extension=pdo_mysql artisan vms:export-pilot` (koneksi `pilot`, env PILOT_DB_*); pilot tidak
+    punya watermark, jadi "delta" CIS = ekspor penuh ulang yang diimpor lagi — sekaligus membuktikan
+    importer idempoten.
+
+.PARAMETER Yard
+    ASL (VMS-old, default) atau CIS (pilot IIS).
 .PARAMETER Server
     Alamat instance SQL Server (default: "localhost,1433").
 .PARAMETER Database
@@ -31,6 +39,10 @@
 #>
 [CmdletBinding()]
 param(
+    [Parameter(Mandatory = $false)]
+    [ValidateSet('ASL', 'CIS')]
+    [string]$Yard = "ASL",
+
     [Parameter(Mandatory = $false)]
     [string]$Server = "localhost,1433",
 
@@ -72,6 +84,30 @@ if (-not [System.IO.Path]::IsPathRooted($OutputDir)) {
     $fullOutputDir = $OutputDir
 }
 
+# PE-8: VMS-old = ASL, pilot IIS = CIS. vms:import menolak sumber yard lain bila VMS_YARD_CODE terisi.
+$source = if ($Yard -eq 'CIS') { 'pilot' } else { 'vms-old' }
+$exportScript = Join-Path $scriptDir "export-vms-old.ps1"
+
+# Ekspor satu set CSV + manifest.json ke $Dir. ASL: export-vms-old.ps1 (dengan -Since untuk delta).
+# CIS: vms:export-pilot selalu penuh; pdo_mysql dimuat hanya untuk perintah ini.
+function Invoke-SourceExport([string]$Dir, [string]$Since) {
+    if ($Yard -eq 'CIS') {
+        Push-Location $LaravelDir
+        try {
+            & $PhpPath -d extension=pdo_mysql artisan vms:export-pilot --path=$Dir
+            if ($LASTEXITCODE -ne 0) { throw "vms:export-pilot gagal (exit code: $LASTEXITCODE). Periksa PILOT_DB_* di .env." }
+        } finally {
+            Pop-Location
+        }
+        return
+    }
+
+    $params = @{ Server = $Server; Database = $Database; OutputDir = $Dir }
+    if ($Since) { $params["Since"] = $Since }
+    if ($Credential) { $params["Credential"] = $Credential }
+    & $exportScript @params
+}
+
 $baselineDir = Join-Path $fullOutputDir "baseline"
 $deltaDir = Join-Path $fullOutputDir "delta"
 $summaryJsonPath = Join-Path $fullOutputDir "rehearsal-summary.json"
@@ -86,6 +122,8 @@ if (-not (Test-Path $deltaDir)) {
 
 $rehearsalStats = @{
     StartedAt = (Get-Date).ToString("o")
+    Yard = $Yard
+    Source = $source
     Server = $Server
     Database = $Database
     BaselineDurationSeconds = 0
@@ -98,7 +136,8 @@ $rehearsalStats = @{
 
 Write-Host "===================================================================" -ForegroundColor Cyan
 Write-Host " VMS CUTOVER REHEARSAL RUNNER (Simulasi Latihan Cutover Produksi)" -ForegroundColor Cyan
-Write-Host " Target SQL Server : $Server | DB: $Database" -ForegroundColor Cyan
+Write-Host " Yard / Sumber     : $Yard / $source" -ForegroundColor Cyan
+if ($Yard -eq 'ASL') { Write-Host " Target SQL Server : $Server | DB: $Database" -ForegroundColor Cyan }
 Write-Host " Output Directory  : $fullOutputDir" -ForegroundColor Cyan
 Write-Host " Laravel Directory : $LaravelDir" -ForegroundColor Cyan
 Write-Host "===================================================================" -ForegroundColor Cyan
@@ -107,7 +146,9 @@ try {
     # -------------------------------------------------------------
     # 1. Verifikasi Konektivitas SQL Server
     # -------------------------------------------------------------
-    if (-not $SkipExport) {
+    if ($Yard -eq 'CIS') {
+        Write-Host "`n[1/6] Konektivitas MySQL pilot diperiksa oleh vms:export-pilot sendiri." -ForegroundColor Gray
+    } elseif (-not $SkipExport) {
         Write-Host "`n[1/6] Memeriksa konektivitas SQL Server [$Server]..." -ForegroundColor Yellow
         $connBuilder = New-Object System.Data.SqlClient.SqlConnectionStringBuilder
         $connBuilder["Data Source"] = $Server
@@ -140,23 +181,12 @@ try {
     # -------------------------------------------------------------
     # 2. Ekspor Baseline Penuh dari VMS-old
     # -------------------------------------------------------------
-    $exportScript = Join-Path $scriptDir "export-vms-old.ps1"
     $baselineManifestPath = Join-Path $baselineDir "manifest.json"
 
     if (-not $SkipExport) {
-        Write-Host "`n[2/6] Mengekspor baseline data penuh dari VMS-old ke: $baselineDir..." -ForegroundColor Yellow
+        Write-Host "`n[2/6] Mengekspor baseline data penuh [$source] ke: $baselineDir..." -ForegroundColor Yellow
         $exportSw = [System.Diagnostics.Stopwatch]::StartNew()
-
-        $exportParams = @{
-            Server = $Server
-            Database = $Database
-            OutputDir = $baselineDir
-        }
-        if ($Credential) {
-            $exportParams["Credential"] = $Credential
-        }
-
-        & $exportScript @exportParams
+        Invoke-SourceExport $baselineDir ''
         $exportSw.Stop()
         Write-Host "  -> Ekspor baseline selesai dalam $($exportSw.Elapsed.TotalSeconds.ToString('F2')) detik." -ForegroundColor Green
     } else {
@@ -168,8 +198,11 @@ try {
     }
 
     $baselineManifest = Get-Content $baselineManifestPath -Raw | ConvertFrom-Json
-    $watermark = $baselineManifest.watermark
-    Write-Host "  -> Watermark baseline terdeteksi: $watermark" -ForegroundColor Cyan
+    $watermark = $null
+    if ($Yard -eq 'ASL') {
+        $watermark = $baselineManifest.watermark
+        Write-Host "  -> Watermark baseline terdeteksi: $watermark" -ForegroundColor Cyan
+    }
 
     # -------------------------------------------------------------
     # 3. Database Fresh & Seeding di Laravel Target
@@ -190,11 +223,11 @@ try {
         # -------------------------------------------------------------
         # 4. Impor Baseline Penuh VMS-old
         # -------------------------------------------------------------
-        Write-Host "`n[4/6] Mengimpor baseline data VMS-old ke sistem baru..." -ForegroundColor Yellow
+        Write-Host "`n[4/6] Mengimpor baseline data [$source] ke sistem baru..." -ForegroundColor Yellow
         $importSw = [System.Diagnostics.Stopwatch]::StartNew()
         Push-Location $LaravelDir
         try {
-            & $PhpPath artisan vms:import --source=vms-old --path=$baselineDir
+            & $PhpPath artisan vms:import --source=$source --path=$baselineDir
             if ($LASTEXITCODE -ne 0) {
                 throw "Gagal menjalankan php artisan vms:import (exit code: $LASTEXITCODE)"
             }
@@ -204,7 +237,7 @@ try {
 
             # Verifikasi Integritas Data (7 Invariants)
             Write-Host "  -> Menjalankan verifikasi integritas 7 invarian data..." -ForegroundColor Yellow
-            & $PhpPath artisan vms:import-verify --source=vms-old --path=$baselineDir
+            & $PhpPath artisan vms:import-verify --source=$source --path=$baselineDir
             if ($LASTEXITCODE -ne 0) {
                 throw "Verifikasi integritas data baseline GAGAL (exit code: $LASTEXITCODE). Fail-closed!"
             }
@@ -217,30 +250,28 @@ try {
         # -------------------------------------------------------------
         # 5. Simulasi Delta Export & Delta Import
         # -------------------------------------------------------------
-        Write-Host "`n[5/6] Simulasi Delta Cutover (-Since)..." -ForegroundColor Yellow
-        # Set watermark delta 1 hari sebelum atau mundur 1 jam dari watermark baseline
-        $sinceDate = [DateTime]::Parse($watermark).AddHours(-2).ToString("yyyy-MM-dd HH:mm:ss")
-        Write-Host "  -> Mengekspor delta sejak: $sinceDate..." -ForegroundColor Cyan
+        $sinceDate = ''
+        if ($Yard -eq 'ASL') {
+            Write-Host "`n[5/6] Simulasi Delta Cutover (-Since)..." -ForegroundColor Yellow
+            # Mundur 2 jam dari watermark baseline, supaya delta tumpang-tindih dengan baseline (uji idempotensi).
+            $sinceDate = [DateTime]::Parse($watermark).AddHours(-2).ToString("yyyy-MM-dd HH:mm:ss")
+            Write-Host "  -> Mengekspor delta sejak: $sinceDate..." -ForegroundColor Cyan
+        } else {
+            Write-Host "`n[5/6] Simulasi malam cutover CIS: ekspor penuh ulang pilot + impor ulang..." -ForegroundColor Yellow
+        }
 
         if (-not $SkipExport) {
-            $deltaParams = @{
-                Server = $Server
-                Database = $Database
-                OutputDir = $deltaDir
-                Since = $sinceDate
-            }
-            if ($Credential) {
-                $deltaParams["Credential"] = $Credential
-            }
-
-            & $exportScript @deltaParams
-            Write-Host "  -> Ekspor delta selesai." -ForegroundColor Green
+            $deltaExportSw = [System.Diagnostics.Stopwatch]::StartNew()
+            Invoke-SourceExport $deltaDir $sinceDate
+            $deltaExportSw.Stop()
+            $rehearsalStats.DeltaExportDurationSeconds = [Math]::Round($deltaExportSw.Elapsed.TotalSeconds, 2)
+            Write-Host "  -> Ekspor delta selesai dalam $($rehearsalStats.DeltaExportDurationSeconds) detik." -ForegroundColor Green
         }
 
         $deltaImportSw = [System.Diagnostics.Stopwatch]::StartNew()
         Push-Location $LaravelDir
         try {
-            & $PhpPath artisan vms:import --source=vms-old --path=$deltaDir
+            & $PhpPath artisan vms:import --source=$source --path=$deltaDir
             if ($LASTEXITCODE -ne 0) {
                 throw "Gagal menjalankan delta import (exit code: $LASTEXITCODE)"
             }
@@ -249,7 +280,7 @@ try {
             Write-Host "  -> Impor delta selesai dalam $($rehearsalStats.DeltaDurationSeconds) detik." -ForegroundColor Green
 
             # Verifikasi Ulang Integritas Pasca Delta
-            & $PhpPath artisan vms:import-verify --source=vms-old --path=$deltaDir
+            & $PhpPath artisan vms:import-verify --source=$source --path=$deltaDir
             if ($LASTEXITCODE -ne 0) {
                 throw "Verifikasi pasca delta import GAGAL (exit code: $LASTEXITCODE)!"
             }
@@ -278,7 +309,8 @@ try {
 # Laporan Latihan Cutover Produksi VMS (Rehearsal Report)
 
 - **Tanggal Simulasi:** $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
-- **Sumber Data:** $Server ($Database)
+- **Yard / Sumber:** $Yard / $source
+- **Sumber Data:** $(if ($Yard -eq 'ASL') { "$Server ($Database)" } else { "MySQL pilot IIS (PILOT_DB_*)" })
 - **Status Akhir:** $($rehearsalStats.Status)
 - **Verifikasi Baseline:** $(if ($rehearsalStats.VerificationPassed) { "LULUS (7/7 Invarian)" } else { "GAGAL" })
 - **Verifikasi Delta:** $(if ($rehearsalStats.DeltaVerificationPassed) { "LULUS" } else { "GAGAL" })

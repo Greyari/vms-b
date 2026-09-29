@@ -43,7 +43,7 @@
 <body>
 
     <div class="header">
-        PT CEMARA INTAN SHIPYARD<br>
+        {{ mb_strtoupper(config('vms.branding.company_name') ?: 'Visitor Management System') }}<br>
         VISITOR REPORT<br>
         <span style="font-size: 10px; font-weight: normal;">
             PERIODE : 

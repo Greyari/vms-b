@@ -58,6 +58,25 @@ class ImportCommand extends Command
             return 1;
         }
 
+        $manifest = json_decode((string) File::get($manifestPath), true);
+        $manifestSource = is_array($manifest) ? ($manifest['source'] ?? null) : null;
+        if ($manifestSource !== null && $manifestSource !== $source) {
+            $this->error("manifest.json in [{$path}] was exported from [{$manifestSource}], not [{$source}].");
+
+            return 1;
+        }
+
+        // Decision PE-8: VMS-old belongs to ASL, the IIS pilot to CIS; never import one yard's data into the other.
+        $sourceYard = ImportSource::from($source)->yardCode();
+        $serverYard = (string) config('vms.sync.yard_code');
+        if ($serverYard === '') {
+            $this->warn("VMS_YARD_CODE is not set, so this server cannot confirm it is {$sourceYard}. [{$source}] holds {$sourceYard}'s data only.");
+        } elseif ($serverYard !== $sourceYard) {
+            $this->error("[{$source}] holds {$sourceYard}'s data, but this server is {$serverYard} (VMS_YARD_CODE). Import refused (decision PE-8).");
+
+            return 1;
+        }
+
         $dryRun = (bool) $this->option('dry-run');
         if ($dryRun) {
             $this->warn('Running in DRY-RUN mode. No changes will be written to database.');
@@ -101,9 +120,7 @@ class ImportCommand extends Command
             ]);
         }
 
-        $reportPath = $report->saveJsonReport(
-            $source === 'vms-old' ? ImportSource::VmsOld : ImportSource::Pilot
-        );
+        $reportPath = $report->saveJsonReport(ImportSource::from($source));
         $this->info("Import report saved to: [{$reportPath}]");
 
         $summary = $report->toArray();

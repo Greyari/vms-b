@@ -1,0 +1,72 @@
+[
+    {
+        "note":  "GET without query or body",
+        "yard":  "CIS",
+        "key_id":  "2026a",
+        "secret":  "test-only-not-a-real-secret-1",
+        "timestamp":  "2026-09-28T03:00:00Z",
+        "nonce":  "8f14e45f-ceea-467a-9575-3d2ff1a1b5c0",
+        "method":  "GET",
+        "path":  "/api/v1/sync/ping",
+        "raw_query":  "",
+        "body":  "",
+        "expected_canonical":  "CIS|2026a|2026-09-28T03:00:00Z|8f14e45f-ceea-467a-9575-3d2ff1a1b5c0|GET|/api/v1/sync/ping|e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "expected_signature":  "cb5c81a111e60991bde33169c619605fba276c19dd3aeda94dd0eb09990d066c"
+    },
+    {
+        "note":  "query pairs are sorted by key",
+        "yard":  "ASL",
+        "key_id":  "2026a",
+        "secret":  "test-only-not-a-real-secret-2",
+        "timestamp":  "2026-09-28T03:00:05Z",
+        "nonce":  "c9f0f895-fb98-4b91-a0c4-7c6a8a0f5e21",
+        "method":  "GET",
+        "path":  "/api/v1/sync/blacklist",
+        "raw_query":  "limit=500\u0026after_seq=42",
+        "body":  "",
+        "expected_canonical":  "ASL|2026a|2026-09-28T03:00:05Z|c9f0f895-fb98-4b91-a0c4-7c6a8a0f5e21|GET|/api/v1/sync/blacklist?after_seq=42\u0026limit=500|e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "expected_signature":  "1f6f1256edc5e9de3d327f2a876c48ceec8f42189fe991ebd5238d2830fd694f"
+    },
+    {
+        "note":  "values are decoded then re-encoded RFC 3986; + is a literal plus",
+        "yard":  "CIS",
+        "key_id":  "2027a",
+        "secret":  "test-only-not-a-real-secret-1",
+        "timestamp":  "2026-09-28T03:00:10Z",
+        "nonce":  "45c48cce-2e2d-4fbd-a1a0-9c6e1b2f3d4e",
+        "method":  "GET",
+        "path":  "/api/v1/sync/pre-registrations",
+        "raw_query":  "q=a%20b\u0026z=1\u0026a=%C3%A9\u0026name=a+b",
+        "body":  "",
+        "expected_canonical":  "CIS|2027a|2026-09-28T03:00:10Z|45c48cce-2e2d-4fbd-a1a0-9c6e1b2f3d4e|GET|/api/v1/sync/pre-registrations?a=%C3%A9\u0026name=a%2Bb\u0026q=a%20b\u0026z=1|e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "expected_signature":  "2143303f4c2d443eb46e1fe906e57819102f3a956d69eda1384c57ad9eaabfcc"
+    },
+    {
+        "note":  "repeated keys are sorted by value",
+        "yard":  "CIS",
+        "key_id":  "2026a",
+        "secret":  "test-only-not-a-real-secret-1",
+        "timestamp":  "2026-09-28T03:00:15Z",
+        "nonce":  "d3d94468-02a4-4b4e-8f6e-1f2a3b4c5d6e",
+        "method":  "GET",
+        "path":  "/api/v1/sync/blacklist",
+        "raw_query":  "k=2\u0026k=10\u0026k=1",
+        "body":  "",
+        "expected_canonical":  "CIS|2026a|2026-09-28T03:00:15Z|d3d94468-02a4-4b4e-8f6e-1f2a3b4c5d6e|GET|/api/v1/sync/blacklist?k=1\u0026k=10\u0026k=2|e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "expected_signature":  "6a2da14ff658f5495281600e9b6a97e09a309f5016621cc07da38cc991d61252"
+    },
+    {
+        "note":  "POST hashes the raw body; method is upper-cased",
+        "yard":  "CIS",
+        "key_id":  "2026a",
+        "secret":  "test-only-not-a-real-secret-1",
+        "timestamp":  "2026-09-28T03:00:20Z",
+        "nonce":  "6512bd43-d9ca-4f6b-9b2a-0e1d2c3b4a59",
+        "method":  "post",
+        "path":  "/api/v1/sync/pre-registrations/ack",
+        "raw_query":  "",
+        "body":  "{\"tokens\":[\"PR-AB12-CD34-EF56\"]}",
+        "expected_canonical":  "CIS|2026a|2026-09-28T03:00:20Z|6512bd43-d9ca-4f6b-9b2a-0e1d2c3b4a59|POST|/api/v1/sync/pre-registrations/ack|edb39f38f369ad37874dc48d2d5b496e098110de6bb0cfc7bef50d90405ec0ec",
+        "expected_signature":  "48a5a6d3423fdc6bd1808aa1c0e5041b573147750ed52c53c0aa141a4378095c"
+    }
+]

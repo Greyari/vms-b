@@ -37,19 +37,27 @@ CI (`.github/workflows/quality.yml`) menjalankan `composer audit`, Pint, suite S
 ## Paket server Windows
 
 `tools/windows/` berisi semua yang dipasang di PC server yard: konfigurasi Apache/PHP, CA internal
-(`setup-ca.ps1`), paket rilis (`build-release.ps1`), deploy + rollback (`deploy.ps1`), backup harian, ekspor
-VMS-old, latihan cutover, audit SLA, dan `INSTALL-GUIDE.md`. Runbook malam cutover: `docs/cutover-runbook.md`.
-Status: kode ada, **belum diverifikasi di PC target maupun data asli**; `deploy.ps1` dan runbook cutover masih
-direvisi (roadmap hybrid langkah 4).
+(`setup-ca.ps1`), berkas password PostgreSQL (`setup-pgpass.ps1`), paket rilis (`build-release.ps1`), deploy +
+rollback (`deploy.ps1`), backup harian, task sync hub (`setup-sync-task.ps1`), NTP (`setup-time-sync.ps1`),
+ekspor VMS-old, latihan cutover per yard (`rehearse-cutover.ps1 -Yard CIS|ASL`), audit SLA, dan
+`INSTALL-GUIDE.md` (termasuk urutan instalasi pertama). Runbook malam cutover dua target (CIS lalu ASL):
+`docs/cutover-runbook.md`. Status: kode ada, **belum diverifikasi di PC target maupun data asli**.
 
 ```powershell
 powershell .\tools\windows\build-release.ps1 -OutputDir release   # default: VMS-web-react di sebelah repo ini
 ```
 
+Branding per yard (nama PT, alamat, logo di pass dan PDF) diatur lewat `VMS_COMPANY_*` di `.env` server dan
+dibaca SPA dari `GET /api/app-config` (keputusan PE-7). Impor data lama hanya menerima sumber milik yard server
+itu (`VMS_YARD_CODE`: VMS-old = ASL, pilot IIS = CIS; keputusan PE-8).
+
 ## Deploy
 
-- **On-prem (target):** paket ZIP dari `build-release.ps1`, dipasang `deploy.ps1` di PC server; nanti lewat
-  workflow `deploy-onprem.yml` yang dipicu manual (roadmap hybrid langkah 9).
+- **On-prem:** paket ZIP dari `build-release.ps1`, dipasang dengan salinan `deploy.ps1` yang dijalankan dari
+  luar `C:\VMS\app` (lihat `INSTALL-GUIDE.md` §7), atau lewat workflow `.github/workflows/deploy-onprem.yml`
+  (dipicu manual, input yard `cis`/`asl`, hanya dari `production` dengan Quality hijau; job kedua berjalan di
+  runner self-hosted berlabel `yard-<yard>`). Workflow butuh secret `ORG_REPO_READ_TOKEN` (PAT read-only ke
+  `VMS-web-react`) dan runner terpasang di PC yard — keduanya pekerjaan owner.
 - **Azure (dipensiunkan 2026-09-28):** `.github/workflows/deploy.yml` sudah dimatikan; push ke `production` tidak
   men-deploy apa pun. Jangan diaktifkan lagi — App Service-nya kini milik Cloud Hub.
 

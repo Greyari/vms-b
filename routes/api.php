@@ -1,18 +1,22 @@
 <?php
 
 use App\Http\Controllers\Api\ActivityLogController;
+use App\Http\Controllers\Api\AppConfigController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CardController;
 use App\Http\Controllers\Api\DashboardController;
+use App\Http\Controllers\Api\GlobalBlacklistController;
 use App\Http\Controllers\Api\HealthDbController;
 use App\Http\Controllers\Api\LocationController;
 use App\Http\Controllers\Api\LookupController;
 use App\Http\Controllers\Api\MailTestController;
 use App\Http\Controllers\Api\PermissionController;
+use App\Http\Controllers\Api\PreRegistrationController;
 use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\RoleController;
 use App\Http\Controllers\Api\StaffController;
+use App\Http\Controllers\Api\SyncController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\VehicleCardController;
 use App\Http\Controllers\Api\VesselArrivalController;
@@ -25,6 +29,9 @@ Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:lo
 // rate limiter here would turn "database down" into a 500 before this probe
 // could answer 503.
 Route::get('/health-db', HealthDbController::class);
+
+// Per-yard branding for the one SPA build (decision PE-7). Public, nothing secret.
+Route::get('/app-config', AppConfigController::class);
 
 Route::middleware('auth:sanctum')->group(function () {
     // Auth-only (no permission required) — identity, session, self-service profile.
@@ -70,6 +77,18 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // --- Visits (write) -------------------------------------------------
     Route::post('/visits', [VisitController::class, 'store'])->middleware('permission:create_visits');
+
+    // Hybrid multi-yard (spec §6.2, §6.3, §8.3): scanned pre-registrations, the global blacklist
+    // mirror and its outbox, and the sync indicator.
+    Route::get('/pre-registrations/{token}', [PreRegistrationController::class, 'show'])->middleware('permission:create_visits');
+    Route::get('/global-blacklists', [GlobalBlacklistController::class, 'index'])->middleware('permission:view_visitors');
+    Route::middleware('permission:manage_blacklist')->group(function () {
+        Route::get('/global-blacklists/outbox', [GlobalBlacklistController::class, 'outbox']);
+        Route::post('/global-blacklists', [GlobalBlacklistController::class, 'store']);
+        Route::post('/global-blacklists/{id}/revoke', [GlobalBlacklistController::class, 'revoke'])->whereUuid('id');
+        Route::post('/sync/run', [SyncController::class, 'run']);
+    });
+    Route::get('/sync/status', [SyncController::class, 'status']);
     Route::put('/visits/{id}', [VisitController::class, 'update'])->middleware('permission:update_visits')->whereUuid('id');
     Route::post('/visits/{id}/checkout', [VisitController::class, 'checkout'])->middleware('permission:checkout_visits');
     Route::delete('/visits/{id}', [VisitController::class, 'destroy'])->middleware('permission:delete_visits');

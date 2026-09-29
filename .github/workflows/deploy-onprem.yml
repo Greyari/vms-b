@@ -1,0 +1,162 @@
+# Deploy gerbang VMS ke PC server satu yard (roadmap hybrid langkah 9; keputusan OPS-6, SEC-8,
+# SEC-8-FREE, OPS-3, OPS-4, OPS-5).
+#
+# - Hanya dipicu MANUAL (workflow_dispatch) oleh owner. Tidak ada trigger push, tag, schedule, atau
+#   pull_request, jadi kode dari PR tidak pernah sampai ke runner di LAN yard (SEC-8).
+# - Hanya dari branch `production`, dan hanya untuk commit yang workflow Quality-nya hijau.
+# - Job `build` (GitHub-hosted, windows-latest) membangun ZIP rilis dengan tools/windows/build-release.ps1
+#   di Windows PowerShell 5.1 — sama persis dengan rilis manual dari laptop. SPA di-checkout dengan PAT
+#   fine-grained read-only `ORG_REPO_READ_TOKEN` (hanya VMS-web-react, berlaku 90 hari, OPS-3).
+# - Job `deploy` berjalan di runner self-hosted yard itu (label `yard-cis` / `yard-asl`, akun lokal
+#   `svc-vms-runner`, OPS-6), memeriksa SHA-256 ZIP terhadap manifest, lalu menjalankan deploy.ps1 MILIK
+#   RILIS ITU SENDIRI dari luar C:\VMS\app (folder itu ditukar saat deploy).
+# - CIS dulu, lalu ASL, di jam sepi. Satu deploy per yard dalam satu waktu.
+#
+# SEC-8-FREE (2026-09-29): org INIT-ASL tetap di GitHub Free tanpa branch protection. Siapa pun yang punya
+# hak tulis ke repo ini — atau token akun itu — bisa mengubah workflow ini dan menjalankan kode di PC server
+# yard, termasuk membaca seluruh data pengunjung. Risiko diterima owner tanpa kontrol pengganti.
+#
+# Workflow Azure lama (deploy.yml) dimatikan 2026-09-28 dan tidak boleh dinyalakan lagi (B-3); berkas ini
+# menggantikannya untuk gerbang.
+
+name: Deploy on-prem
+
+on:
+  workflow_dispatch:
+    inputs:
+      yard:
+        description: "Yard tujuan (CIS dulu, lalu ASL)"
+        type: choice
+        options: [cis, asl]
+        required: true
+      frontend_ref:
+        description: "Branch/tag/SHA VMS-web-react yang dibangun"
+        type: string
+        default: production
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: deploy-onprem-${{ inputs.yard }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build release
+    if: github.ref == 'refs/heads/production'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Require a green Quality run for this commit
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $conclusion = gh run list --repo "${{ github.repository }}" --workflow quality.yml --commit "${{ github.sha }}" --json conclusion --jq '.[0].conclusion'
+          if ($conclusion -ne 'success') {
+            throw "Quality for ${{ github.sha }} is '$conclusion', not 'success'. Push, wait for Quality to pass, then deploy."
+          }
+
+      - uses: actions/checkout@v4
+        with:
+          path: VMS-backend-laravel
+          persist-credentials: false
+
+      - uses: actions/checkout@v4
+        with:
+          repository: INIT-ASL/VMS-web-react
+          ref: ${{ inputs.frontend_ref }}
+          token: ${{ secrets.ORG_REPO_READ_TOKEN }}
+          path: VMS-web-react
+          persist-credentials: false
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          extensions: pdo_pgsql, pgsql, mbstring, gd, bcmath, intl, zip, fileinfo
+          tools: composer
+          coverage: none
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: VMS-web-react/package-lock.json
+
+      - name: npm ci (SPA)
+        working-directory: VMS-web-react
+        run: npm ci
+
+      - name: Release version
+        id: version
+        shell: pwsh
+        run: |
+          $version = '{0}-{1}' -f (Get-Date -Format 'yyyyMMdd_HHmmss'), '${{ github.sha }}'.Substring(0, 7)
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      # Windows PowerShell 5.1, the same shell the yard server runs deploy.ps1 in.
+      - name: build-release.ps1
+        shell: powershell
+        run: >
+          & "$env:GITHUB_WORKSPACE\VMS-backend-laravel\tools\windows\build-release.ps1"
+          -BackendDir "$env:GITHUB_WORKSPACE\VMS-backend-laravel"
+          -FrontendDir "$env:GITHUB_WORKSPACE\VMS-web-react"
+          -OutputDir "$env:RUNNER_TEMP\release"
+          -Version "${{ steps.version.outputs.version }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vms-release-${{ steps.version.outputs.version }}
+          path: |
+            ${{ runner.temp }}\release\vms-release-${{ steps.version.outputs.version }}.zip
+            ${{ runner.temp }}\release\release-manifest-${{ steps.version.outputs.version }}.json
+          retention-days: 14
+          if-no-files-found: error
+
+  deploy:
+    name: Deploy to yard ${{ inputs.yard }}
+    needs: build
+    if: github.ref == 'refs/heads/production'
+    runs-on: [self-hosted, windows, "yard-${{ inputs.yard }}"]
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: vms-release-${{ needs.build.outputs.version }}
+          path: ${{ runner.temp }}\release
+
+      - name: Verify, keep and deploy the release
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = Join-Path $env:RUNNER_TEMP 'release'
+          $manifest = Get-Content -Raw -LiteralPath (Join-Path $dir 'release-manifest-${{ needs.build.outputs.version }}.json') | ConvertFrom-Json
+          $zip = Join-Path $dir $manifest.file
+          $actual = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
+          if ($actual -ne $manifest.sha256) { throw "SHA-256 mismatch for $($manifest.file): $actual vs $($manifest.sha256)" }
+
+          # Keep the ZIP next to the earlier ones (the five newest stay).
+          $kept = Join-Path 'C:\VMS\releases' $manifest.file
+          Copy-Item -LiteralPath $zip -Destination $kept -Force
+          Get-ChildItem -LiteralPath 'C:\VMS\releases' -Filter 'vms-release-*.zip' | Sort-Object Name -Descending |
+            Select-Object -Skip 5 | Remove-Item -Force
+
+          # This release's own deploy.ps1, run from outside C:\VMS\app (the app folder is moved).
+          $unpack = Join-Path $env:RUNNER_TEMP 'unpacked'
+          if (Test-Path -LiteralPath $unpack) { Remove-Item -LiteralPath $unpack -Recurse -Force }
+          Expand-Archive -LiteralPath $kept -DestinationPath $unpack -Force
+          & (Join-Path $unpack 'tools\windows\deploy.ps1') -ReleaseZip $kept
+          if ($LASTEXITCODE -ne 0) { throw "deploy.ps1 exited $LASTEXITCODE - see the log above; the previous release is back." }
+          Write-Host "Deployed $($manifest.file) (backend $($manifest.backend_commit), frontend $($manifest.frontend_commit))."
+
+      - name: Remove the unpacked copy
+        if: always()
+        shell: powershell
+        run: Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'unpacked') -Recurse -Force -ErrorAction SilentlyContinue

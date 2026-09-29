@@ -3,16 +3,21 @@
 namespace App\Http\Controllers\Api;
 
 use App\Enums\LocationType;
+use App\Enums\PreRegistrationStatus;
 use App\Enums\VisitorType;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\VisitorSummaryResource;
 use App\Http\Resources\VisitResource;
+use App\Models\GlobalBlacklist;
 use App\Models\Location;
+use App\Models\PreRegistration;
 use App\Models\Staff;
 use App\Models\VehicleCard;
 use App\Models\Visit;
 use App\Models\Visitor;
 use App\Models\VisitorCard;
+use App\Services\ActivityLogger;
+use App\Support\GlobalBlacklistCheck;
 use App\Support\IdentityNumber;
 use App\Support\NumberingRetry;
 use App\Support\SequenceLock;
@@ -33,11 +38,17 @@ class VisitController extends Controller
         // VMS owns its visitor registry: a visitor is known here or not at all.
         $visitor = Visitor::where('id_number', IdentityNumber::normalize($ktp))->first();
 
-        if ($visitor === null) {
-            return response()->json(['data' => null]);
-        }
+        // Hybrid spec §6.2: the officer sees global entries for this number as soon as it is typed,
+        // whatever document type they were listed under (SEC-4); the SPA compares the type.
+        $global = GlobalBlacklistCheck::activeEntries((string) $ktp)
+            ->map(fn (GlobalBlacklist $entry): array => GlobalBlacklistCheck::describe($entry))
+            ->values()
+            ->all();
 
-        return response()->json(['data' => (new VisitorSummaryResource($visitor))->resolve(request())]);
+        return response()->json([
+            'data' => $visitor === null ? null : (new VisitorSummaryResource($visitor))->resolve(request()),
+            'global_blacklist' => $global,
+        ]);
     }
 
     public function searchVisitor(Request $request)
@@ -195,6 +206,10 @@ class VisitController extends Controller
             'vehicle_card_id' => 'bail|nullable|uuid|exists:vehicle_cards,id',
             'purpose' => 'required|string',
             'vehicle_no' => 'nullable|string',
+            // Hybrid spec §6.2: the scanned QR token, and a supervisor's override of a global entry (SEC-7).
+            'pre_registration_token' => ['sometimes', 'nullable', 'string', 'max:30'],
+            'override_global_blacklist' => ['sometimes', 'boolean'],
+            'override_reason' => ['required_if_accepted:override_global_blacklist', 'nullable', 'string', 'min:10', 'max:500'],
         ]);
 
         // The blacklist gate runs BEFORE the transaction: rejecting here avoids
@@ -214,6 +229,39 @@ class VisitController extends Controller
                 'reason' => $existingVisitor->blacklist_reason,
             ], 422);
         }
+
+        // The scanned pre-registration must still be usable (hybrid spec §6.2).
+        $preRegistration = null;
+        if (filled($validated['pre_registration_token'] ?? null)) {
+            $preRegistration = PreRegistration::firstWhere('token', PreRegistration::normalizeToken($validated['pre_registration_token']));
+            $refusal = match ($preRegistration?->effectiveStatus()) {
+                null => 'This pre-registration is not known at this gate yet.',
+                PreRegistrationStatus::CheckedIn => 'This pre-registration has already been used for a check-in.',
+                PreRegistrationStatus::Expired => 'This pre-registration has expired.',
+                default => null,
+            };
+            if ($refusal !== null) {
+                return response()->json(['message' => $refusal], 422);
+            }
+        }
+
+        // Global blacklist, checked before any visitor is created, new visitors included (BE-6). The same
+        // number under the same document type blocks unless a supervisor overrides it with a reason
+        // (SEC-7); under another type it only warns (SEC-4).
+        $globalEntries = GlobalBlacklistCheck::activeEntries($validated['id_number']);
+        $blocking = GlobalBlacklistCheck::blocking($globalEntries, $validated['id_type']);
+        $canOverride = (bool) $request->user()?->can('manage_blacklist');
+        if ($blocking !== null && ! $request->boolean('override_global_blacklist')) {
+            return response()->json([
+                'message' => 'This visitor is on the global blacklist.',
+                'global_blacklist' => GlobalBlacklistCheck::describe($blocking),
+                'can_override' => $canOverride,
+            ], 422);
+        }
+        if ($blocking !== null && ! $canOverride) {
+            return response()->json(['message' => 'Only a supervisor can let a visitor on the global blacklist through.'], 403);
+        }
+        $warnings = GlobalBlacklistCheck::warnings($globalEntries, $validated['id_type']);
 
         $location = Location::find($validated['location_id']);
         $locationName = $location?->name;
@@ -242,7 +290,7 @@ class VisitController extends Controller
         // commit. The unique indexes stay the backstop — a retryable violation
         // gets up to NumberingRetry::MAX_ATTEMPTS attempts.
         try {
-            $visit = NumberingRetry::run(function () use ($request, $validated, $locationName, $hostName, $newVisitorAttributes, $closeOpenVisits) {
+            $visit = NumberingRetry::run(function () use ($request, $validated, $locationName, $hostName, $newVisitorAttributes, $closeOpenVisits, $preRegistration) {
                 $visitor = Visitor::firstOrCreate(
                     [
                         'id_type' => $validated['id_type'],
@@ -346,15 +394,37 @@ class VisitController extends Controller
                     $vehicleCard->update(['status' => 'in_use']);
                 }
 
+                // The scanned pre-registration, or else one booked for today under the same number (a
+                // walk-in who had pre-registered, PE-4). Read fresh on every attempt: a retry follows a
+                // rollback, and an instance changed by the failed attempt would not save again.
+                $linked = $preRegistration !== null
+                    ? PreRegistration::find($preRegistration->id)
+                    : PreRegistration::pendingFor($validated['id_number'], $now->toDateString());
+                $linked?->markCheckedIn($visit);
+
                 return $visit;
             });
 
             $visit->load(['visitor', 'staff', 'location', 'visitorCards', 'vehicleCard']);
 
-            return response()->json([
+            if ($blocking !== null) {
+                ActivityLogger::logEvent('blacklist_override', [
+                    'hub_id' => $blocking->hub_id,
+                    'id_type' => $blocking->id_type,
+                    'id_number' => $blocking->id_number,
+                    'name' => $blocking->name,
+                    'reason_category' => $blocking->reason_category->value,
+                    'registered_by_yard' => $blocking->registered_by_yard,
+                    'reason' => $validated['override_reason'],
+                    'visit_id' => $visit->id,
+                ]);
+            }
+
+            return response()->json(array_filter([
                 'message' => 'Visit recorded successfully',
                 'visit' => (new VisitResource($visit))->resolve(),
-            ], 201);
+                'warnings' => $warnings,
+            ], fn ($value) => $value !== []), 201);
 
         } catch (HttpResponseException $e) {
             // A guard rejected the registration — return its response.

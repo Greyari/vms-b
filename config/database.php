@@ -99,6 +99,24 @@ return [
             'sslmode' => env('DB_SSLMODE', 'prefer'),
         ],
 
+        // The CIS IIS pilot's MySQL database (decision PE-8), read only by `php artisan vms:export-pilot`
+        // on the CIS server during cutover. PILOT_DB_* stay empty everywhere else; the CLI needs
+        // pdo_mysql, loaded for that one command with `php -d extension=pdo_mysql`.
+        'pilot' => [
+            'driver' => 'mysql',
+            'host' => env('PILOT_DB_HOST', '127.0.0.1'),
+            'port' => env('PILOT_DB_PORT', '3306'),
+            'database' => env('PILOT_DB_DATABASE', 'db_vms'),
+            'username' => env('PILOT_DB_USERNAME', ''),
+            'password' => env('PILOT_DB_PASSWORD', ''),
+            'charset' => 'utf8mb4',
+            'collation' => 'utf8mb4_unicode_ci',
+            'prefix' => '',
+            'prefix_indexes' => true,
+            'strict' => true,
+            'engine' => null,
+        ],
+
         'sqlsrv' => [
             'driver' => 'sqlsrv',
             'url' => env('DB_URL'),

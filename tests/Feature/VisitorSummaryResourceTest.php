@@ -100,6 +100,7 @@ it('leaves the visit count out of check-ktp and the check-in search', function (
 it('returns data null with 200 when check-ktp does not find the visitor', function () {
     $response = $this->getJson('/api/visitors/check-ktp/9999999999999999');
 
+    // global_blacklist: hybrid spec §6.2, empty when the mirror has no active entry for the number.
     $response->assertOk()
-        ->assertExactJson(['data' => null]);
+        ->assertExactJson(['data' => null, 'global_blacklist' => []]);
 });

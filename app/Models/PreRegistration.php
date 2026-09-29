@@ -60,4 +60,61 @@ class PreRegistration extends Model
     {
         return $this->belongsTo(Visit::class);
     }
+
+    /** Pending pre-registrations whose day has passed become expired (hybrid spec §6.2, PE-4). */
+    public static function expirePast(): int
+    {
+        return static::where('status', PreRegistrationStatus::Pending->value)
+            ->whereDate('scheduled_date', '<', now()->toDateString())
+            ->update(['status' => PreRegistrationStatus::Expired->value, 'updated_at' => now()]);
+    }
+
+    /** Status as the counter should see it: a pending row whose day has passed is expired. */
+    public function effectiveStatus(): PreRegistrationStatus
+    {
+        if ($this->status === PreRegistrationStatus::Pending && $this->scheduled_date->toDateString() < now()->toDateString()) {
+            return PreRegistrationStatus::Expired;
+        }
+
+        return $this->status;
+    }
+
+    public function markCheckedIn(Visit $visit): void
+    {
+        $this->forceFill(['status' => PreRegistrationStatus::CheckedIn, 'visit_id' => $visit->id])->save();
+    }
+
+    /**
+     * A walk-in who arrived before this pre-registration was pulled: same identity number, a visit on
+     * the scheduled day, not yet linked to another pre-registration (decision PE-4).
+     */
+    public function linkWalkIn(): void
+    {
+        if ($this->status !== PreRegistrationStatus::Pending) {
+            return;
+        }
+
+        $visit = Visit::whereDate('date', $this->scheduled_date->toDateString())
+            ->whereHas('visitor', fn ($query) => $query->where('id_number', $this->id_number))
+            ->whereNotIn('id', static::whereNotNull('visit_id')->select('visit_id'))
+            ->oldest()
+            ->first();
+
+        if ($visit !== null) {
+            $this->markCheckedIn($visit);
+        }
+    }
+
+    /**
+     * The pending pre-registration a walk-in fulfils: the same identity number booked for the day of
+     * the visit (decision PE-4).
+     */
+    public static function pendingFor(string $idNumber, string $date): ?self
+    {
+        return static::where('status', PreRegistrationStatus::Pending->value)
+            ->where('id_number', IdentityNumber::normalize($idNumber))
+            ->whereDate('scheduled_date', $date)
+            ->oldest()
+            ->first();
+    }
 }

@@ -1,8 +1,17 @@
 # Panduan Instalasi dan Deployment Server Lokal VMS Windows 11 PC
 
-Dokumen ini merupakan panduan resmi instalasi langkah demi langkah (*runbook*) untuk menyiapkan server produksi lokal VMS pada satu PC Windows 11 Pro 64-bit yang terhubung ke Local Area Network (LAN) Shipyard.
+Dokumen ini merupakan panduan instalasi langkah demi langkah (*runbook*) untuk menyiapkan server produksi lokal
+VMS pada satu PC Windows 11 Pro 64-bit di LAN sebuah yard. Setiap yard (CIS, ASL) punya servernya sendiri dan
+mengikuti panduan yang sama; yang berbeda hanya isian bertanda `<…>`.
 
-**Referensi Desain:** `D:\INIT-ASL\docs\superpowers\specs\2026-09-13-vms-local-server-parity-design.md` (§2.1–§2.10, §6.3).
+- **Referensi desain:** `D:\INIT-ASL\docs\superpowers\specs\2026-09-13-vms-local-server-parity-design.md`
+  (§2.1–§2.10, §6.3). **Keputusan hybrid multi-yard yang mengikat:** `D:\INIT-ASL\docs\decisions\vms-hybrid-decisions.md`.
+- **Menghubungkan server ke Cloud Hub:** `D:\INIT-ASL\docs\vms-multi-yard-setup-runbook.md` (setelah panduan ini selesai).
+- **Status:** belum pernah dijalankan utuh di PC target. Direvisi 2026-09-29 (OPS-5f, OPS-8, PE-7, BE-6): contoh
+  password dihapus, prosedur instalasi pertama dibetulkan, sumber waktu diganti ke NTP internet.
+
+**Aturan kredensial:** tidak ada password yang ditulis ke dokumen ini, tiket, atau chat. Setiap `<…>` diisi di
+server saja, dan password PostgreSQL **unik per server**.
 
 ---
 
@@ -17,8 +26,8 @@ Dokumen ini merupakan panduan resmi instalasi langkah demi langkah (*runbook*) u
 
 ### B. Konfigurasi Sistem Operasi & Jaringan
 1. **IP Statis LAN:**
-   - Berikan IP statis pada adapter Ethernet LAN (misal: `192.168.10.200/24`, Gateway: `192.168.10.1`, DNS: `192.168.10.1`).
-   - Tetapkan nama host komputer menjadi `vms-server` (atau nama domain lokal `vms.asl.local`).
+   - Berikan IP statis pada adapter Ethernet LAN (`<IP-server>/24`, Gateway dan DNS sesuai jaringan yard).
+   - Tetapkan nama host komputer, misalnya `vms-server`.
 2. **Pengaturan Daya (Power Plan):**
    - Buka Control Panel -> Power Options -> Pilih **High Performance**.
    - Klik *Change plan settings*:
@@ -28,10 +37,12 @@ Dokumen ini merupakan panduan resmi instalasi langkah demi langkah (*runbook*) u
    - Masuk ke Settings -> Windows Update -> Advanced options -> *Active hours*: Setel **05:00 s/d 23:00**.
    - Nonaktifkan restart otomatis di luar jam kerja; restart pemeliharaan hanya dilakukan secara manual oleh tim IT.
 4. **Struktur Direktori Standar:**
-   - Buat struktur folder utama di drive `C:`:
-     ```powershell
-     New-Item -ItemType Directory -Path "C:\VMS\app", "C:\VMS\php", "C:\VMS\Apache24", "C:\VMS\certs", "C:\VMS\backups\daily", "C:\VMS\releases\previous", "C:\VMS\tools" -Force
-     ```
+   ```powershell
+   New-Item -ItemType Directory -Path "C:\VMS\app", "C:\VMS\php", "C:\VMS\Apache24", "C:\VMS\certs", "C:\VMS\backups\daily", "C:\VMS\releases", "C:\VMS\tools" -Force
+   ```
+   `C:\VMS\app` berisi rilis yang sedang jalan (ditukar oleh `deploy.ps1`), `C:\VMS\releases` menyimpan ZIP dan
+   rilis sebelumnya, `C:\VMS\tools` tempat salinan `deploy.ps1` dijalankan (§7), dan `C:\VMS\secrets` dibuat
+   oleh `setup-pgpass.ps1` (§2.4).
 
 ---
 
@@ -40,31 +51,38 @@ Dokumen ini merupakan panduan resmi instalasi langkah demi langkah (*runbook*) u
 1. **Unduh & Jalankan Installer:**
    - Unduh installer resmi PostgreSQL 18 x64 dari EnterpriseDB (EDB).
    - Jalankan installer dengan hak akses Administrator.
-   - Direktori instalasi: `C:\Program Files\PostgreSQL\18`.
-   - Tetapkan port: `5432`.
-   - Tetapkan password akun superuser `postgres`.
-2. **Konfigurasi `postgresql.conf`:**
-   - Buka berkas `C:\Program Files\PostgreSQL\18\data\postgresql.conf`.
-   - Pastikan binding hanya ke localhost:
-     ```ini
-     listen_addresses = 'localhost'
-     port = 5432
-     ```
-   - **PENTING (Temuan Rencana 2A):** Setel pesan lokal ke bahasa Inggris agar deteksi bentrok nomor tiket / nomor visitor mengenali format error bahasa Inggris:
-     ```ini
-     lc_messages = 'en_US.UTF-8'
-     ```
-3. **Inisialisasi Database & Role Pengguna:**
-   - Buka SQL Shell (`psql`) atau Command Prompt:
-     ```sql
-     CREATE ROLE vms_app WITH LOGIN PASSWORD 'vms_rahasia_aman_2026';
-     CREATE DATABASE db_vms OWNER vms_app;
-     GRANT ALL PRIVILEGES ON DATABASE db_vms TO vms_app;
-     \c db_vms
-     GRANT ALL ON SCHEMA public TO vms_app;
-     ```
-4. **Verifikasi Service:**
-   - Pastikan Windows Service `postgresql-x64-18` berjalan dengan Startup Type **Automatic**.
+   - Direktori instalasi: `C:\Program Files\PostgreSQL\18`. Port: `5432`.
+   - Tetapkan password superuser `postgres` (unik untuk server ini).
+   - Tambahkan `C:\Program Files\PostgreSQL\18\bin` ke `PATH` sistem (`deploy.ps1` memanggil `pg_dump` dan
+     `pg_restore` dari PATH).
+2. **Konfigurasi `postgresql.conf`** (`C:\Program Files\PostgreSQL\18\data\postgresql.conf`):
+   ```ini
+   listen_addresses = 'localhost'
+   port = 5432
+   lc_messages = 'C'
+   ```
+   `lc_messages = 'C'` membuat pesan galat PostgreSQL berbahasa Inggris tanpa terjemahan — deteksi bentrok nomor
+   tiket / nomor visitor (Plan 2A) membaca pesan itu. Nilai `'C'` selalu sah di Windows, berbeda dengan nama
+   locale gaya Linux seperti `en_US.UTF-8` yang bisa membuat service gagal start. Restart service, lalu
+   `psql -U postgres -c "SHOW lc_messages;"` harus menjawab `C`.
+3. **Database & role aplikasi (OPS-5f):** aplikasi memakai `vms_app`, **bukan** `postgres`. Di `psql -U postgres`:
+   ```sql
+   CREATE ROLE vms_app WITH LOGIN PASSWORD '<password-vms_app-unik-server-ini>';
+   CREATE DATABASE db_vms OWNER vms_app;
+   ```
+   `vms_app` memiliki database-nya (migrasi butuh DDL) tetapi bukan superuser. `postgres` hanya dipakai untuk
+   dump/restore saat deploy.
+4. **Berkas password untuk dump/restore:** setelah paket rilis pertama diekstrak (§7 langkah 2), jalankan dari
+   PowerShell Administrator:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File C:\VMS\app\tools\windows\setup-pgpass.ps1
+   ```
+   Skrip menanyakan password `postgres` dan `vms_app` di konsol (tidak masuk riwayat PowerShell), menulis
+   `C:\VMS\secrets\pgpass.conf`, dan mengunci foldernya hanya untuk Administrators dan SYSTEM. `deploy.ps1` dan
+   backup harian membaca berkas itu lewat `PGPASSFILE` dan selalu memakai `-w`, jadi tidak pernah menunggu
+   password. Setelah runner GitHub dipasang (roadmap langkah 9), jalankan ulang dengan
+   `-GrantUser svc-vms-runner`. Mengganti password = jalankan ulang skrip ini.
+5. **Verifikasi Service:** Windows Service `postgresql-x64-18` berjalan dengan Startup Type **Automatic**.
 
 ---
 
@@ -101,28 +119,28 @@ Dokumen ini merupakan panduan resmi instalasi langkah demi langkah (*runbook*) u
 
 1. **Ekstrak PHP:**
    - Unduh PHP 8.4 x64 Thread Safe ZIP dari `windows.php.net`.
-   - Ekstrak seluruh isi ke `C:\VMS\php`.
+   - Ekstrak seluruh isi ke `C:\VMS\php`, lalu tambahkan `C:\VMS\php` ke `PATH` sistem.
 2. **Konfigurasi `php.ini`:**
    - Salin berkas `tools/windows/php/php-production.ini` ke `C:\VMS\php\php.ini`.
    - Pastikan folder sementara `C:\VMS\php\temp` dan `C:\VMS\php\logs` telah dibuat.
 3. **Uji Modul PHP:**
-   - Buka PowerShell:
-     ```powershell
-     C:\VMS\php\php.exe -v
-     C:\VMS\php\php.exe -m
-     ```
-   - Pastikan ekstensi `pdo_pgsql`, `pgsql`, `intl`, `gd`, `openssl`, `mbstring`, `zip`, dan `Zend OPcache` muncul dalam daftar.
+   ```powershell
+   php -v
+   php -m
+   ```
+   Pastikan ekstensi `pdo_pgsql`, `pgsql`, `intl`, `gd`, `openssl`, `mbstring`, `zip`, `curl`, dan
+   `Zend OPcache` muncul. (`pdo_mysql` sengaja tidak dimuat; hanya server CIS memakainya sekali, saat ekspor
+   pilot di malam cutover, lewat `php -d extension=pdo_mysql` — lihat `docs/cutover-runbook.md`.)
 
 ---
 
 ## 5. Pembuatan Sertifikat SSL & Otoritas CA Internal
 
-1. **Jalankan Generator Sertifikat:**
-   - Buka PowerShell di server lokal:
-     ```powershell
-     cd C:\VMS\tools\windows
-     .\setup-ca.ps1 -ServerIp "192.168.10.200" -Hostname "vms.asl.local" -OutputDir "C:\VMS\certs" -OpenSslPath "C:\VMS\Apache24\bin\openssl.exe"
-     ```
+1. **Jalankan Generator Sertifikat** (setelah §7 langkah 2, karena skrip ikut di paket rilis):
+   ```powershell
+   cd C:\VMS\app\tools\windows
+   .\setup-ca.ps1 -ServerIp "<IP-server>" -Hostname "<nama-host>.local" -OutputDir "C:\VMS\certs" -OpenSslPath "C:\VMS\Apache24\bin\openssl.exe"
+   ```
 2. **Hasil Berkas:**
    - `C:\VMS\certs\vms-root-ca.crt` (Root CA publik).
    - `C:\VMS\certs\vms-root-ca.key` (Kunci privat Root CA — pindahkan ke flashdisk IT offline setelah selesai!).
@@ -131,20 +149,22 @@ Dokumen ini merupakan panduan resmi instalasi langkah demi langkah (*runbook*) u
 3. **Pemasangan di PC Konter Security (Wajib):**
    - Salin `vms-root-ca.crt` dan `import-root-ca.bat` ke setiap PC konter gerbang security.
    - Klik kanan `import-root-ca.bat` -> **Run as Administrator** (menjalankan `certutil -addstore -f Root vms-root-ca.crt`).
-   - Buka browser Chrome/Edge di PC konter: pastikan mengakses `https://192.168.10.200` tidak memunculkan peringatan sertifikat merah.
+   - Buka browser Chrome/Edge di PC konter: mengakses `https://<IP-server>` tidak boleh memunculkan peringatan
+     sertifikat.
 
 ---
 
 ## 6. Konfigurasi Lingkungan Produksi `.env`
 
-Buat berkas `C:\VMS\app\.env` dengan konfigurasi berikut:
+Buat berkas `C:\VMS\app\.env` (setelah §7 langkah 2). Nilai bertanda `<…>` diisi di server; bagian Cloud Hub
+dijelaskan di runbook setup multi-yard §4–§5.
 
 ```ini
-APP_NAME="VMS Shipyard"
+APP_NAME="VMS"
 APP_ENV=production
-APP_KEY=base64:GENERATE_KEY_DENGAN_ARTISAN_KEY_GENERATE
+APP_KEY=
 APP_DEBUG=false
-APP_URL=https://192.168.10.200
+APP_URL=https://<IP-server>
 
 LOG_CHANNEL=daily
 LOG_LEVEL=warning
@@ -154,79 +174,142 @@ DB_HOST=127.0.0.1
 DB_PORT=5432
 DB_DATABASE=db_vms
 DB_USERNAME=vms_app
-DB_PASSWORD=vms_rahasia_aman_2026
+DB_PASSWORD="<password vms_app>"
 
 BROADCAST_CONNECTION=log
 FILESYSTEM_DISK=local
 QUEUE_CONNECTION=sync
+MAIL_MAILER=log
 
-# Sesi & Cache di Database (Menjamin stabilitas tanpa Redis)
+# Sesi & Cache di Database (tanpa Redis)
 CACHE_STORE=database
 SESSION_DRIVER=database
 SESSION_LIFETIME=120
 
-# Keamanan Jaringan LAN (Wajib Dikosongkan di Server Lokal)
+# Keamanan Jaringan LAN (wajib dikosongkan di server lokal: Apache melihat PC konter langsung)
 TRUSTED_PROXIES=
+
+# Akun awal, hanya dibaca saat db:seed pertama (§7). Hapus kedua password setelah seed berhasil.
+VMS_ADMIN_EMAIL=admin@<yard>.local
+VMS_ADMIN_NAME="VMS Admin"
+VMS_ADMIN_PASSWORD="<password-awal-admin>"
+VMS_SECURITY_EMAIL=security@<yard>.local
+VMS_SECURITY_NAME="VMS Security"
+VMS_SECURITY_PASSWORD="<password-awal-security>"
+
+# Branding yard ini di pass dan PDF laporan (PE-7). Logo = NAMA berkas di C:\VMS\app\public\branding\
+# (dibawa otomatis oleh deploy.ps1 ke setiap rilis berikutnya); kosongkan bila tanpa logo.
+VMS_COMPANY_NAME="<nama PT yard ini>"
+VMS_COMPANY_ADDRESS="<alamat singkat>"
+VMS_COMPANY_LOGO=
+
+# Kode yard: CIS atau ASL. vms:import menolak data yard lain (PE-8) dan sync memakai kode ini (BE-6).
+VMS_YARD_CODE=<CIS|ASL>
+
+# Sync ke Cloud Hub — mati sampai checklist runbook setup multi-yard §8 lulus
+VMS_SYNC_ENABLED=false
+VMS_CLOUD_HUB_URL=
+VMS_CLOUD_HMAC_KEY_ID=
+VMS_CLOUD_HMAC_SECRET=
 ```
 
 ---
 
-## 7. Eksekusi Deployment Perdana
+## 7. Instalasi Pertama & Deployment Berikutnya
 
-1. Di komputer pengembang/laptop, buat paket rilis:
+### Membuat paket rilis (di laptop pengembang)
+```powershell
+powershell -ExecutionPolicy Bypass -File D:\INIT-ASL\VMS\VMS-backend-laravel\tools\windows\build-release.ps1
+```
+ZIP (`vms-release-<versi>.zip`) dan manifest SHA-256-nya muncul di `D:\INIT-ASL\VMS\release\`. Salin ZIP ke
+`C:\VMS\releases\` di server.
+
+### Instalasi pertama (server kosong)
+`deploy.ps1` hanya untuk server yang sudah punya aplikasi jalan (ia membutuhkan `.env` dan `storage\` rilis
+lama). Server baru dipasang begini, dari PowerShell Administrator:
+
+1. `Stop-Service VMS-Apache -ErrorAction SilentlyContinue`
+2. `Expand-Archive C:\VMS\releases\vms-release-<versi>.zip -DestinationPath C:\VMS\app`
+3. Buat `C:\VMS\app\.env` (§6), lalu jalankan `setup-pgpass.ps1` (§2.4) dan `setup-ca.ps1` (§5).
+4. Di `C:\VMS\app`:
    ```powershell
-   cd D:\INIT-ASL\VMS
-   powershell .\tools\windows\build-release.ps1 -OutputDir "D:\INIT-ASL\VMS\release"
+   php artisan key:generate --force
+   php artisan migrate --force
+   php artisan db:seed --force
+   php artisan config:cache
+   php artisan route:cache
+   php artisan view:cache
    ```
-2. Salin berkas ZIP rilis (misal `vms-release-20260925_010000.zip`) ke server `C:\VMS\releases\`.
-3. Di server produksi, jalankan skrip deploy:
-   ```powershell
-   cd C:\VMS\tools\windows
-   .\deploy.ps1 -ReleaseZip "C:\VMS\releases\vms-release-20260925_010000.zip"
-   ```
-4. Skrip akan memverifikasi probe kesehatan `GET https://127.0.0.1/api/health-db`. Jika respon 200, aplikasi aktif.
+   Urutan ini penting: seeder membaca `VMS_ADMIN_*`/`VMS_SECURITY_*` langsung dari `.env`, yang tidak terbaca
+   lagi setelah `config:cache`. Setelah seed berhasil, hapus kedua password awal dari `.env` lalu jalankan
+   `php artisan config:cache` sekali lagi.
+5. Logo yard (opsional): salin berkas logo ke `C:\VMS\app\public\branding\` dan isi `VMS_COMPANY_LOGO` dengan
+   nama berkasnya.
+6. `Start-Service VMS-Apache`, lalu `curl.exe -k https://127.0.0.1/api/health-db` harus menjawab `{"status":"ok"}`.
+
+### Deployment berikutnya
+Folder `C:\VMS\app` dipindah saat deploy, jadi `deploy.ps1` dijalankan dari salinannya di luar folder itu
+(skrip menolak jalan dari dalam `C:\VMS\app`):
+```powershell
+Copy-Item C:\VMS\app\tools\windows\deploy.ps1 C:\VMS\tools\deploy.ps1 -Force
+C:\VMS\tools\deploy.ps1 -ReleaseZip "C:\VMS\releases\vms-release-<versi>.zip"
+```
+Urutannya (OPS-5): ekstrak ke folder baru + bawa `.env` dan `public\branding\` → `artisan down` → `pg_dump`
+wajib sukses → jeda task `VMS-Cloud-Sync` → tukar folder → migrate → cache → start Apache → probe
+`GET https://127.0.0.1/api/health-db` 6 kali tiap 5 detik → `artisan up`. Gagal di langkah mana pun setelah
+tukar folder = rilis lama kembali + dump deploy itu di-restore otomatis. Rollback manual:
+`C:\VMS\tools\deploy.ps1 -Rollback` (tambah `-RestoreDump <berkas>` hanya bila database juga harus kembali).
 
 ---
 
 ## 8. Penjadwalan Backup Otomatis Database
 
-Jalankan skrip pendaftaran Windows Task Scheduler:
 ```powershell
-cd C:\VMS\tools\windows
-.\setup-backup-task.ps1 -DailyTime "02:00" -ScriptPath "C:\VMS\tools\windows\backup-db.ps1" -SecondaryDir "D:\VMS-Backups"
+powershell -ExecutionPolicy Bypass -File C:\VMS\app\tools\windows\setup-backup-task.ps1 -DailyTime "02:00" -SecondaryDir "D:\VMS-Backups"
 ```
-Backup akan berjalan otomatis setiap hari pukul 02:00 WIB sebagai akun `SYSTEM` tanpa perlu login pengguna.
+Backup berjalan setiap hari pukul 02:00 WIB sebagai akun `SYSTEM` tanpa perlu login. `backup-db.ps1` memakai
+`vms_app` dan `-w`, dengan password dari `C:\VMS\secrets\pgpass.conf` (§2.4) — tanpa berkas itu backup
+**gagal** (tercatat di `C:\VMS\backups\daily\backup.log`), tidak menggantung. Uji sekali setelah didaftarkan:
+`schtasks /Run /TN VMS-Daily-Backup`, lalu pastikan berkas `db_vms-*.dump` baru muncul dan tidak kosong.
 
 ---
 
 ## 9. Firewall & Sinkronisasi Waktu
 
 1. **Windows Defender Firewall:**
-   - Izinkan koneksi port HTTP (80) dan HTTPS (443) hanya dari subnet LAN shipyard:
+   - Izinkan HTTP (80) dan HTTPS (443) hanya dari subnet LAN yard:
      ```powershell
-     New-NetFirewallRule -DisplayName "VMS Web HTTP" -Direction Inbound -LocalPort 80 -Protocol TCP -Action Allow -RemoteAddress 192.168.10.0/24
-     New-NetFirewallRule -DisplayName "VMS Web HTTPS" -Direction Inbound -LocalPort 443 -Protocol TCP -Action Allow -RemoteAddress 192.168.10.0/24
+     New-NetFirewallRule -DisplayName "VMS Web HTTP" -Direction Inbound -LocalPort 80 -Protocol TCP -Action Allow -RemoteAddress <subnet-LAN-yard>
+     New-NetFirewallRule -DisplayName "VMS Web HTTPS" -Direction Inbound -LocalPort 443 -Protocol TCP -Action Allow -RemoteAddress <subnet-LAN-yard>
      ```
-   - Pastikan port 5432 (PostgreSQL) diblokir dari akses luar (hanya localhost).
-2. **Sinkronisasi Waktu NTP LAN Lokal:**
-   - Server beroperasi tanpa internet. Arahkan Windows Time Service ke Domain Controller atau Router NTP LAN lokal:
-     ```powershell
-     w32tm /config /manualpeerlist:"192.168.10.1" /syncfromflags:manual /reliable:yes /update
-     net stop w32time ; net start w32time
-     w32tm /resync
-     ```
+   - Port 5432 (PostgreSQL) tidak dibuka (hanya localhost). Tidak ada port masuk dari internet.
+   - Keluar ke internet hanya dibutuhkan untuk HTTPS 443 (Cloud Hub, GitHub) dan UDP 123 (NTP).
+2. **Sinkronisasi Waktu — NTP internet (OPS-8):** yard tidak punya server waktu di LAN; server VMS sync langsung
+   ke NTP internet tiap jam (tanda tangan sync ke hub hanya menerima selisih ±300 detik). Dari PowerShell
+   Administrator:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File C:\VMS\app\tools\windows\setup-time-sync.ps1
+   ```
+   Syarat lulus: `w32tm /query /status` menyebut sumber NTP (bukan `Local CMOS Clock`).
 
 ---
 
 ## 10. Checklist Penerimaan Server Lokal (Spec §6.3)
 
-Sebelum konter gerbang beralih menggunakan server baru, 8 checklist penerimaan berikut wajib diuji dan diverifikasi:
+Sebelum konter gerbang beralih menggunakan server baru, checklist penerimaan berikut wajib diuji:
 
-- [ ] **1. Sertifikat HTTPS:** URL `https://192.168.10.200` dibuka di PC konter tanpa peringatan sertifikat merah (gembok hijau / aman).
-- [ ] **2. Login Username:** Petugas berhasil login menggunakan username (misal `ADMIN` atau akun pos) tanpa peka huruf besar-kecil.
-- [ ] **3. Siklus Kunjungan Lengkap:** Alur Check-in -> cetak pass fisik ke printer thermal/laser -> Check-out berhasil tanpa kendala.
-- [ ] **4. Cetak Ulang & Laporan:** Fitur Reprint, Edit Kunjungan, Visitor Report (Print, Excel, PDF), Vessel Report, dan Crew Arrival berfungsi normal.
-- [ ] **5. Simulasi Internet / WAN Putus:** Lepas kabel uplink internet dari switch LAN. Seluruh operasional check-in, cetak pass, dan laporan tetap berjalan lancar 100%.
-- [ ] **6. Reboot Tanpa Login:** Restart komputer server PC Windows. Tanpa ada operator yang login ke Windows desktop, service `postgresql-x64-18` dan `VMS-Apache` otomatis menyala, dan PC konter langsung bisa mengakses kembali.
-- [ ] **7. Uji Restore Database:** Berkas dump dari `C:\VMS\backups\daily\` berhasil di-restore ke database sementara (`vms_test`) tanpa data corrupt.
-- [ ] **8. Sinkronisasi Jam:** Waktu sistem server cocok dengan sumber waktu LAN lokal dengan deviasi < 1 detik.
+- [ ] **1. Sertifikat HTTPS:** `https://<IP-server>` dibuka di PC konter tanpa peringatan sertifikat.
+- [ ] **2. Login Username:** Petugas berhasil login menggunakan username tanpa peka huruf besar-kecil.
+- [ ] **3. Siklus Kunjungan Lengkap:** Check-in -> cetak pass ke printer konter -> Check-out berhasil; pass
+      mencetak nama PT **yard ini** (PE-7).
+- [ ] **4. Cetak Ulang & Laporan:** Reprint, Edit Kunjungan, Visitor Report (Print, Excel, PDF), Vessel Report,
+      dan Crew Arrival berfungsi normal.
+- [ ] **5. Simulasi Internet / WAN Putus:** Lepas kabel uplink internet. Check-in, cetak pass, dan laporan tetap
+      berjalan 100%.
+- [ ] **6. Reboot Tanpa Login:** Restart PC server tanpa login desktop; `postgresql-x64-18` dan `VMS-Apache`
+      menyala sendiri dan PC konter bisa mengakses kembali.
+- [ ] **7. Backup & Restore:** task `VMS-Daily-Backup` menghasilkan dump tidak kosong, dan dump itu berhasil
+      di-restore ke database sementara (`vms_restore_test`) tanpa galat.
+- [ ] **8. Sinkronisasi Jam:** `w32tm /query /status` bersumber NTP dan selisih ke `time.windows.com` < 2 detik.
+- [ ] **9. Deploy & Rollback:** satu deploy rilis uji lewat `C:\VMS\tools\deploy.ps1` sukses, lalu
+      `-Rollback` mengembalikan rilis sebelumnya dengan `health-db` tetap `ok`.

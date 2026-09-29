@@ -124,6 +124,7 @@ class ImportVerifyCommand extends Command
             'nationalities' => fn () => Nationality::count(),
             'locations' => fn () => Location::count(),
             'staff' => fn () => Staff::count(),
+            'staffs' => fn () => Staff::count(), // vms:export-pilot's key
             'cards' => fn () => VisitorCard::count(),
             'visitors' => fn () => Visitor::count(),
             'visits' => fn () => Visit::count(),

@@ -45,4 +45,45 @@ return [
 
     'spa_index' => env('VMS_SPA_INDEX', public_path('index.html')),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Yard branding (decision PE-7)
+    |--------------------------------------------------------------------------
+    |
+    | One SPA build serves every yard; this server's own company name, address
+    | and logo go on the printed pass and the reports. The logo is a file name
+    | inside public/branding/ (copied there at install, never in the release).
+    |
+    */
+
+    'branding' => [
+        'company_name' => (string) env('VMS_COMPANY_NAME', ''),
+        'company_address' => (string) env('VMS_COMPANY_ADDRESS', ''),
+        'logo' => env('VMS_COMPANY_LOGO') ?: null,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Cloud Hub sync (hybrid multi-yard, decision BE-6)
+    |--------------------------------------------------------------------------
+    |
+    | `php artisan vms:sync-cloud-hub`, run every minute by Task Scheduler, does
+    | nothing until VMS_SYNC_ENABLED is true. The gate never needs the hub: a
+    | failed cycle is recorded in sync_state_logs and the counters keep working.
+    | hub_url ends in /api/v1 (https://<static web app host>/api/v1). The HMAC
+    | secret is this yard's only credential for the hub; it lives in .env only.
+    |
+    */
+
+    'sync' => [
+        'enabled' => (bool) env('VMS_SYNC_ENABLED', false),
+        'yard_code' => strtoupper(trim((string) env('VMS_YARD_CODE', ''))),
+        'hub_url' => rtrim((string) env('VMS_CLOUD_HUB_URL', ''), '/'),
+        'key_id' => (string) env('VMS_CLOUD_HMAC_KEY_ID', ''),
+        'secret' => (string) env('VMS_CLOUD_HMAC_SECRET', ''),
+        'timeout_seconds' => 15,
+        'pre_registration_batch' => 100,
+        'blacklist_batch' => 500,
+    ],
+
 ];

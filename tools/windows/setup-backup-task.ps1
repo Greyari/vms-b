@@ -15,7 +15,8 @@ param(
     [string]$DailyTime = "02:00",
 
     [Parameter(Mandatory = $false)]
-    [string]$ScriptPath = "C:\VMS\tools\windows\backup-db.ps1",
+    # The release ships the scripts inside the app; deploy.ps1 keeps this path valid across releases.
+    [string]$ScriptPath = "C:\VMS\app\tools\windows\backup-db.ps1",
 
     [Parameter(Mandatory = $false)]
     [string]$SecondaryDir = ""

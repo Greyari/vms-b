@@ -6,6 +6,10 @@
     membersihkan arsip dump yang melewati masa retensi (default: 30 hari),
     dan menyalin berkas dump ke secondary disk / LAN network share.
     Spec Reference: 2026-09-13-vms-local-server-parity-design.md (§2.8).
+
+    Task Scheduler menjalankannya sebagai SYSTEM tanpa terminal, jadi pg_dump memakai -w (tidak pernah
+    bertanya password) dan membaca password dari -PgPassFile (C:\VMS\secrets\pgpass.conf, ditulis oleh
+    setup-pgpass.ps1). Tanpa berkas itu backup gagal dengan pesan jelas, bukan menggantung (OPS-5f).
 #>
 [CmdletBinding()]
 param(
@@ -31,7 +35,10 @@ param(
     [string]$DbHost = "127.0.0.1",
 
     [Parameter(Mandatory = $false)]
-    [int]$DbPort = 5432
+    [int]$DbPort = 5432,
+
+    [Parameter(Mandatory = $false)]
+    [string]$PgPassFile = "C:\VMS\secrets\pgpass.conf"
 )
 
 Set-StrictMode -Version Latest
@@ -60,11 +67,26 @@ if (Get-Command $PgDumpPath -ErrorAction SilentlyContinue) {
     $resolvedPgDump = "pg_dump"
 }
 
-# Run pg_dump
-cmd /c "$resolvedPgDump -Fc -U $DbUser -h $DbHost -p $DbPort -f `"$dumpFilePath`" $Database"
+if (Test-Path -LiteralPath $PgPassFile) {
+    $env:PGPASSFILE = $PgPassFile
+} else {
+    Add-Content -Path $logFile -Value "[$((Get-Date).ToString("yyyy-MM-dd HH:mm:ss"))] PERINGATAN: $PgPassFile tidak ada - jalankan setup-pgpass.ps1"
+}
 
-if ($LASTEXITCODE -ne 0 -or (-not (Test-Path -Path $dumpFilePath))) {
-    $errMsg = "[$((Get-Date).ToString("yyyy-MM-dd HH:mm:ss"))] GAGAL: Eksekusi pg_dump menghasilkan kode error $LASTEXITCODE"
+# Run pg_dump. Called directly (not through cmd.exe) so a path with spaces works; stderr is not fatal under
+# PowerShell 5.1, only the exit code and the file decide.
+$previousPreference = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+try {
+    & $resolvedPgDump -Fc -w -U $DbUser -h $DbHost -p $DbPort -f $dumpFilePath $Database 2>&1 |
+        ForEach-Object { Add-Content -Path $logFile -Value "  pg_dump: $_" }
+    $dumpExit = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $previousPreference
+}
+
+if ($dumpExit -ne 0 -or (-not (Test-Path -Path $dumpFilePath)) -or (Get-Item $dumpFilePath).Length -eq 0) {
+    $errMsg = "[$((Get-Date).ToString("yyyy-MM-dd HH:mm:ss"))] GAGAL: Eksekusi pg_dump menghasilkan kode error $dumpExit"
     Write-Error $errMsg
     Add-Content -Path $logFile -Value $errMsg
     exit 1
