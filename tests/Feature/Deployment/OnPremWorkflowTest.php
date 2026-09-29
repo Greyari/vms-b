@@ -42,6 +42,16 @@ it('builds with the same script as a laptop release, reading the SPA with the re
         ->and($this->workflow)->not->toContain('id-token: write');
 });
 
+it('runs the yard steps with a process-scoped execution policy, never relying on the PC\'s own', function () {
+    // CIS, 2026-09-30: Windows 11 ships with the Restricted policy, and the runner's plain `shell: powershell`
+    // dot-sources a .ps1 file, so every yard step died with "running scripts is disabled on this system".
+    $deployJob = substr($this->workflow, strpos($this->workflow, "\n  deploy:"));
+    $bypass = 'shell: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "& \'{0}\'"';
+
+    expect(substr_count($deployJob, $bypass))->toBe(2)
+        ->and(preg_match('/^\s+shell: powershell$/m', $deployJob))->toBe(0);
+});
+
 it('checks the ZIP hash and runs that release\'s own deploy.ps1 from outside the app folder', function () {
     expect($this->workflow)->toContain('Get-FileHash -LiteralPath $zip -Algorithm SHA256')
         ->and($this->workflow)->toContain('if ($actual -ne $manifest.sha256)')

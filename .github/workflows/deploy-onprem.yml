@@ -133,8 +133,10 @@ jobs:
           name: vms-release-${{ needs.build.outputs.version }}
           path: ${{ runner.temp }}\release
 
+      # The yard PC keeps Windows' default Restricted execution policy; the runner writes each step to a .ps1
+      # file, so the policy is bypassed for this one process only (never changed on the machine).
       - name: Verify, keep and deploy the release
-        shell: powershell
+        shell: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "& '{0}'"
         run: |
           $ErrorActionPreference = 'Stop'
           $dir = Join-Path $env:RUNNER_TEMP 'release'
@@ -159,5 +161,5 @@ jobs:
 
       - name: Remove the unpacked copy
         if: always()
-        shell: powershell
+        shell: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "& '{0}'"
         run: Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'unpacked') -Recurse -Force -ErrorAction SilentlyContinue
