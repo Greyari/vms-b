@@ -129,6 +129,19 @@ function Invoke-Native([string] $Exe, [string[]] $Arguments) {
     }
 }
 
+# Laravel writes framework\down (maintenance mode) and framework\views (compiled Blade) under storage\. A release
+# ZIP carries this skeleton, but storage\ travels from the running app to every new release, so an install that
+# lacks a folder keeps lacking it. The CIS server did (2026-09-30): `artisan down` and `view:cache` both failed.
+function Initialize-Storage([string] $StorageDir) {
+    foreach ($sub in @('app\public', 'framework\cache\data', 'framework\sessions', 'framework\views', 'logs')) {
+        $path = Join-Path $StorageDir $sub
+        if (-not (Test-Path -LiteralPath $path)) {
+            New-Item -ItemType Directory -Path $path -Force | Out-Null
+            Write-Host "   created $path" -ForegroundColor DarkYellow
+        }
+    }
+}
+
 function Invoke-Artisan([string] $Dir, [string[]] $Arguments) {
     return Invoke-Native $PhpExe (@((Join-Path $Dir 'artisan')) + $Arguments)
 }
@@ -229,9 +242,13 @@ if (Test-Path -LiteralPath $branding) {
     Copy-Item -LiteralPath $branding -Destination (Join-Path $newDir 'public\branding') -Recurse -Force
 }
 
-# 2. Maintenance mode
+# 2. Maintenance mode. Without it visits could be written while migrations run, so a failure stops here.
+Initialize-Storage (Join-Path $AppDir 'storage')
 Write-Step 'php artisan down'
-[void] (Invoke-Artisan $AppDir @('down', '--retry=60'))
+if ((Invoke-Artisan $AppDir @('down', '--retry=60')) -ne 0) {
+    Remove-Item -LiteralPath $newDir -Recurse -Force -ErrorAction SilentlyContinue
+    throw 'php artisan down failed - deploy stopped, nothing changed.'
+}
 
 # 3. Dump, which must succeed (b)
 $dump = Join-Path $BackupDir "pre-deploy-$stamp.dump"

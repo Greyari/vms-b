@@ -320,6 +320,13 @@ class WindowsPackageTest extends TestCase
         $this->assertStringContainsString('$DbAdminUser', $content);                                        // (f)
         $this->assertStringContainsString("'-w', '-U', \$DbAdminUser", $content);                          // (f) pgpass, never a password
         $this->assertStringContainsString("ErrorActionPreference = 'Continue'", $content);                 // stderr of php/pg_* is not fatal
+
+        // CIS, 2026-09-30: the running app's storage\ had no framework\ (a first install from a zipped staging
+        // folder), so `artisan down` and `view:cache` failed and the deploy rolled back. storage\ travels between
+        // releases, so the skeleton is re-created before anything runs, and a failed `down` stops the deploy.
+        $this->assertStringContainsString("Initialize-Storage (Join-Path \$AppDir 'storage')", $content);
+        $this->assertStringContainsString("'framework\\views'", $content);
+        $this->assertStringContainsString('php artisan down failed - deploy stopped, nothing changed.', $content);
         $this->assertStringContainsString('--if-exists', $content);
     }
 
