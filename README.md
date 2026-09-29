@@ -56,10 +56,10 @@ itu (`VMS_YARD_CODE`: VMS-old = ASL, pilot IIS = CIS; keputusan PE-8).
 - **On-prem:** paket ZIP dari `build-release.ps1`, dipasang dengan salinan `deploy.ps1` yang dijalankan dari
   luar `C:\VMS\app` (lihat `INSTALL-GUIDE.md` §7), atau lewat workflow `.github/workflows/deploy-onprem.yml`
   (dipicu manual, input yard `cis`/`asl`, hanya dari `production` dengan Quality hijau; job kedua berjalan di
-  runner self-hosted berlabel `yard-<yard>`). Workflow butuh secret `ORG_REPO_READ_TOKEN` (PAT read-only ke
-  `VMS-web-react`) dan runner terpasang di PC yard — keduanya pekerjaan owner.
-- **Azure (dipensiunkan 2026-09-28):** `.github/workflows/deploy.yml` sudah dimatikan; push ke `production` tidak
-  men-deploy apa pun. Jangan diaktifkan lagi — App Service-nya kini milik Cloud Hub.
+  runner self-hosted berlabel `yard-<yard>`). SPA dibaca lewat deploy key SSH read-only (secret
+  `VMS_WEB_REACT_DEPLOY_KEY`, dipasang 2026-09-29, rotasi tahunan — OPS-3-KEY); runner di PC yard dipasang owner.
+- **Azure (dipensiunkan 2026-09-28):** workflow `deploy.yml` lama dimatikan 2026-09-28 dan berkasnya dihapus
+  2026-09-29; push ke `production` hanya menjalankan Quality. App Service-nya kini milik Cloud Hub.
 
 ## Git
 

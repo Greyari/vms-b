@@ -34,9 +34,10 @@ it('lets the operator choose the yard, and runs on that yard\'s own runner only'
         ->and($this->workflow)->toContain('group: deploy-onprem-${{ inputs.yard }}');
 });
 
-it('builds with the same script as a laptop release, reading the SPA with the read-only token', function () {
+it('builds with the same script as a laptop release, reading the SPA with the read-only deploy key', function () {
     expect($this->workflow)->toContain('tools\windows\build-release.ps1')
-        ->and($this->workflow)->toContain('token: ${{ secrets.ORG_REPO_READ_TOKEN }}')
+        ->and($this->workflow)->toContain('ssh-key: ${{ secrets.VMS_WEB_REACT_DEPLOY_KEY }}') // OPS-3-KEY
+        ->and($this->workflow)->not->toContain('ORG_REPO_READ_TOKEN')
         ->and($this->workflow)->toContain('repository: INIT-ASL/VMS-web-react')
         ->and($this->workflow)->not->toContain('id-token: write');
 });

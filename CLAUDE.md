@@ -16,13 +16,13 @@ tokens, not Passport). It runs offline on one Windows PC per yard; the React SPA
 | `tools/windows/` | Windows server package: Apache/PHP config, `setup-ca.ps1`, `setup-pgpass.ps1`, `build-release.ps1`, `deploy.ps1`, backup task, sync task, NTP, `export-vms-old.ps1`, cutover rehearsal (`-Yard CIS\|ASL`) and SLA audit, `INSTALL-GUIDE.md`. Moved into the repo 2026-09-28 (B-2). |
 | `docs/cutover-runbook.md` | Night-cutover runbook for two targets, CIS first then ASL (revised 2026-09-29, PE-8). |
 | `.github/workflows/quality.yml` | Audit, Pint, tests on SQLite **and** on PostgreSQL 18 (job `postgres`). |
-| `.github/workflows/deploy-onprem.yml` | On-prem deploy (roadmap step 9, 2026-09-29): `workflow_dispatch` only, input yard `cis`/`asl`, `production` only, needs a green Quality run for the SHA; builds on `windows-latest`, deploys on the self-hosted runner labelled `yard-<yard>`. Needs secret `ORG_REPO_READ_TOKEN`. |
-| `.github/workflows/deploy.yml` | Former Azure deploy of the gate — **disabled 2026-09-28** (step 3); `deploy-onprem.yml` replaces it. Deleting the file is the owner's call. |
+| `.github/workflows/deploy-onprem.yml` | On-prem deploy (roadmap step 9, 2026-09-29): `workflow_dispatch` only, input yard `cis`/`asl`, `production` only, needs a green Quality run for the SHA; builds on `windows-latest`, deploys on the self-hosted runner labelled `yard-<yard>`. Reads the SPA with the read-only deploy key in secret `VMS_WEB_REACT_DEPLOY_KEY` (OPS-3-KEY, rotate yearly). |
+| ~~`.github/workflows/deploy.yml`~~ | Former Azure deploy of the gate — disabled 2026-09-28 (step 3), **file deleted 2026-09-29** on the owner's instruction; `deploy-onprem.yml` replaces it. |
 
 ## Git
 
 **Never `git add`, `commit`, `push` or `rm`** — the owner does git. Show `git status --short` before handing off.
-`deploy.yml` (Azure) was disabled on 2026-09-28 and must not be re-enabled: `as-api-vms-bt-apps` now belongs to
+The old Azure `deploy.yml` was disabled on 2026-09-28 and deleted on 2026-09-29; never bring it back: `as-api-vms-bt-apps` now belongs to
 the Cloud Hub (decision B-3).
 
 ## How to write code here

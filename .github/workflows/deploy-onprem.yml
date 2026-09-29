@@ -5,8 +5,9 @@
 #   pull_request, jadi kode dari PR tidak pernah sampai ke runner di LAN yard (SEC-8).
 # - Hanya dari branch `production`, dan hanya untuk commit yang workflow Quality-nya hijau.
 # - Job `build` (GitHub-hosted, windows-latest) membangun ZIP rilis dengan tools/windows/build-release.ps1
-#   di Windows PowerShell 5.1 — sama persis dengan rilis manual dari laptop. SPA di-checkout dengan PAT
-#   fine-grained read-only `ORG_REPO_READ_TOKEN` (hanya VMS-web-react, berlaku 90 hari, OPS-3).
+#   di Windows PowerShell 5.1 — sama persis dengan rilis manual dari laptop. SPA di-checkout dengan deploy key
+#   SSH read-only `VMS_WEB_REACT_DEPLOY_KEY` (hanya repo VMS-web-react, tidak terikat akun orang, dirotasi
+#   manual setahun sekali — keputusan OPS-3-KEY, 2026-09-29, menggantikan PAT 90 hari OPS-3).
 # - Job `deploy` berjalan di runner self-hosted yard itu (label `yard-cis` / `yard-asl`, akun lokal
 #   `svc-vms-runner`, OPS-6), memeriksa SHA-256 ZIP terhadap manifest, lalu menjalankan deploy.ps1 MILIK
 #   RILIS ITU SENDIRI dari luar C:\VMS\app (folder itu ditukar saat deploy).
@@ -71,7 +72,7 @@ jobs:
         with:
           repository: INIT-ASL/VMS-web-react
           ref: ${{ inputs.frontend_ref }}
-          token: ${{ secrets.ORG_REPO_READ_TOKEN }}
+          ssh-key: ${{ secrets.VMS_WEB_REACT_DEPLOY_KEY }}
           path: VMS-web-react
           persist-credentials: false
 
