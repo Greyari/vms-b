@@ -26,10 +26,19 @@ class AppConfigController extends Controller
     /** Only a plain file name inside public/branding/, and only when the file is really there. */
     private function logoUrl(?string $logo): ?string
     {
-        if ($logo === null || $logo === '' || basename($logo) !== $logo) {
+        if ($logo === null || $logo === '') {
             return null;
         }
 
-        return is_file(public_path('branding'.DIRECTORY_SEPARATOR.$logo)) ? '/branding/'.rawurlencode($logo) : null;
+        $cleaned = ltrim($logo, '/\\');
+        if (str_starts_with($cleaned, 'branding/') || str_starts_with($cleaned, 'branding\\')) {
+            $cleaned = substr($cleaned, 9);
+        }
+
+        if (basename($cleaned) !== $cleaned || $cleaned === '') {
+            return null;
+        }
+
+        return is_file(public_path('branding'.DIRECTORY_SEPARATOR.$cleaned)) ? '/branding/'.rawurlencode($cleaned) : null;
     }
 }
