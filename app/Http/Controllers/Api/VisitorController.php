@@ -10,10 +10,10 @@ use App\Http\Resources\VisitorSummaryResource;
 use App\Http\Resources\VisitResource;
 use App\Models\Visit;
 use App\Models\Visitor;
+use App\Services\MasterImportService;
 use App\Support\IdentityNumber;
 use App\Support\NumberingRetry;
 use App\Support\UniqueViolation;
-use App\Services\MasterImportService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
@@ -24,6 +24,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 use Spatie\SimpleExcel\SimpleExcelReader;
 use Spatie\SimpleExcel\SimpleExcelWriter;
 
@@ -372,7 +373,7 @@ class VisitorController extends Controller
 
         if ($extension === 'xls') {
             try {
-                $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($file->getRealPath());
+                $spreadsheet = IOFactory::load($file->getRealPath());
                 $worksheet = $spreadsheet->getActiveSheet();
                 $data = $worksheet->toArray(null, true, true, false);
 
@@ -597,7 +598,7 @@ class VisitorController extends Controller
             $visitor = $existing;
         } else {
             $visitor = DB::transaction(function () use ($data) {
-                $newVisitor = new Visitor();
+                $newVisitor = new Visitor;
                 $newVisitor->forceFill($data);
                 $newVisitor->save();
 

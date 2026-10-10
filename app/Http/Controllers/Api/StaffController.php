@@ -9,7 +9,6 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
-use Spatie\SimpleExcel\SimpleExcelReader;
 use Spatie\SimpleExcel\SimpleExcelWriter;
 
 class StaffController extends Controller
@@ -61,9 +60,10 @@ class StaffController extends Controller
 
         try {
             $result = $importService->import(MasterImportService::TYPE_STAFF, $request->file('file'), $duplicateAction);
+
             return response()->json($result);
         } catch (\Throwable $e) {
-            return response()->json(['message' => 'Import failed. ' . $e->getMessage()], 400);
+            return response()->json(['message' => 'Import failed. '.$e->getMessage()], 400);
         }
     }
 

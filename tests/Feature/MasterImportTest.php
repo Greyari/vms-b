@@ -5,6 +5,8 @@ use App\Models\Staff;
 use App\Models\VehicleCard;
 use App\Models\VisitorCard;
 use Illuminate\Http\UploadedFile;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xls;
 use Spatie\SimpleExcel\SimpleExcelWriter;
 
 it('downloads templates for all master import types', function (string $type, string $uri) {
@@ -211,13 +213,13 @@ it('previews and imports cards from legacy xls file', function () {
     $base = tempnam(sys_get_temp_dir(), 'vms_card_xls_');
     $path = $base.'.xls';
 
-    $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+    $spreadsheet = new Spreadsheet;
     $sheet = $spreadsheet->getActiveSheet();
     $sheet->fromArray([
         ['card_no', 'card_type', 'note'],
         ['VC-LEGACY-01', 'visitor', 'Legacy XLS Card'],
     ]);
-    $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xls($spreadsheet);
+    $writer = new Xls($spreadsheet);
     $writer->save($path);
 
     try {
@@ -241,4 +243,3 @@ it('previews and imports cards from legacy xls file', function () {
         @unlink($base);
     }
 });
-

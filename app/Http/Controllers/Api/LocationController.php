@@ -61,9 +61,10 @@ class LocationController extends Controller
 
         try {
             $result = $importService->import(MasterImportService::TYPE_LOCATION, $request->file('file'), $duplicateAction);
+
             return response()->json($result);
         } catch (\Throwable $e) {
-            return response()->json(['message' => 'Import failed. ' . $e->getMessage()], 400);
+            return response()->json(['message' => 'Import failed. '.$e->getMessage()], 400);
         }
     }
 

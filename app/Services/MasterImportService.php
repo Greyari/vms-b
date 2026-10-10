@@ -9,13 +9,15 @@ use App\Models\Staff;
 use App\Models\VehicleCard;
 use App\Models\Visitor;
 use App\Models\VisitorCard;
+use App\Support\IdentityNumber;
 use App\Support\NumberingRetry;
 use App\Support\UniqueViolation;
 use Carbon\Carbon;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Shared\Date;
 use Spatie\SimpleExcel\SimpleExcelReader;
 use Spatie\SimpleExcel\SimpleExcelWriter;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -23,9 +25,13 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 class MasterImportService
 {
     public const TYPE_CARD = 'card';
+
     public const TYPE_VEHICLE_CARD = 'vehicle_card';
+
     public const TYPE_STAFF = 'staff';
+
     public const TYPE_LOCATION = 'location';
+
     public const TYPE_BLACKLIST = 'blacklist';
 
     /**
@@ -279,11 +285,19 @@ class MasterImportService
                             'identifier' => $analysis['identifier'] ?? '-',
                             'reason' => $analysis['error'],
                         ];
+
                         continue;
                     }
 
                     try {
-                        $result = $this->persistRow($type, $cleanRow, $analysis, $duplicateAction);
+                        // Each row runs inside its own savepoint (nested transaction).
+                        // On PostgreSQL a single failed statement aborts the whole
+                        // transaction (SQLSTATE 25P02), so without a savepoint every
+                        // following row would fail too. Rolling back to the savepoint
+                        // discards only the broken row and lets the import continue.
+                        $result = DB::transaction(
+                            fn () => $this->persistRow($type, $cleanRow, $analysis, $duplicateAction)
+                        );
                         if ($result === 'created') {
                             $created++;
                         } elseif ($result === 'updated') {
@@ -381,7 +395,7 @@ class MasterImportService
      */
     private function readXlsRows(UploadedFile $file, int $maxRows): array
     {
-        $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($file->getRealPath());
+        $spreadsheet = IOFactory::load($file->getRealPath());
         $worksheet = $spreadsheet->getActiveSheet();
         $data = $worksheet->toArray(null, true, true, false);
 
@@ -424,7 +438,7 @@ class MasterImportService
     /**
      * Clean and normalize keys/values in a raw row.
      *
-     * @param array<string, mixed> $rawRow
+     * @param  array<string, mixed>  $rawRow
      * @return array<string, mixed>
      */
     private function cleanRow(array $rawRow): array
@@ -437,14 +451,15 @@ class MasterImportService
             $cleanVal = is_string($value) ? trim($value) : $value;
             $cleaned[$cleanKey] = $cleanVal;
         }
+
         return $cleaned;
     }
 
     /**
      * Robust value extraction matching clean and normalized header keys.
      *
-     * @param array<string, mixed> $row
-     * @param array<int, string> $candidates
+     * @param  array<string, mixed>  $row
+     * @param  array<int, string>  $candidates
      */
     public static function extractRowValue(array $row, array $candidates, string $default = ''): string
     {
@@ -494,7 +509,8 @@ class MasterImportService
             $num = (float) $raw;
             if ($num >= 10000 && $num <= 80000) {
                 try {
-                    $dt = \PhpOffice\PhpSpreadsheet\Shared\Date::excelToDateTimeObject($num);
+                    $dt = Date::excelToDateTimeObject($num);
+
                     return Carbon::instance($dt)->format('Y-m-d');
                 } catch (\Throwable) {
                     // fallback below
@@ -514,6 +530,7 @@ class MasterImportService
             }
             $day = str_pad($m[1], 2, '0', STR_PAD_LEFT);
             $month = str_pad($m[2], 2, '0', STR_PAD_LEFT);
+
             return sprintf('%04d-%02d-%02d', $year, $month, $day);
         }
 
@@ -525,6 +542,7 @@ class MasterImportService
             }
             $day = str_pad($m[1], 2, '0', STR_PAD_LEFT);
             $month = str_pad($m[2], 2, '0', STR_PAD_LEFT);
+
             return sprintf('%04d-%02d-%02d', $year, $month, $day);
         }
 
@@ -536,6 +554,7 @@ class MasterImportService
             }
             $day = str_pad($m[1], 2, '0', STR_PAD_LEFT);
             $month = str_pad($m[2], 2, '0', STR_PAD_LEFT);
+
             return sprintf('%04d-%02d-%02d', $year, $month, $day);
         }
 
@@ -570,8 +589,10 @@ class MasterImportService
 
         $extractedBadge = null;
 
-        // Check if badge info is embedded inside KTP text (e.g. "2171072409720001, HID : LAE 0076")
-        if (preg_match('/(?:H\s*\.?\s*I\s*\.?\s*D|Badge|Emp\s*(?:Code|No)?)\s*(?:No)?\s*[:\.]?\s*([A-Za-z0-9_\-\s]+)/i', $cleanKtp, $badgeMatch)) {
+        // Check if badge info is embedded inside KTP text (e.g. "2171072409720001, HID : LAE 0076").
+        // Word boundaries keep "Temp Pass" from matching "Emp", and the code must contain a digit.
+        if (preg_match('/\b(?:H\s*\.?\s*I\s*\.?\s*D|Badge|Emp\s*(?:Code|No)?)\b\s*(?:No)?\s*[:\.]?\s*([A-Za-z0-9_\-\s]+)/i', $cleanKtp, $badgeMatch)
+            && preg_match('/\d/', $badgeMatch[1])) {
             $extractedBadge = trim($badgeMatch[1]);
             if (empty($cleanBadge)) {
                 $cleanBadge = $extractedBadge;
@@ -653,16 +674,19 @@ class MasterImportService
             }
         }
 
-        // 4. If KTP column had Badge / Emp Code (e.g. "Emp Code : 37647", "Badge No 50064")
-        if (! $isDummyText && preg_match('/(?:Badge|Emp|GTP|Pass)/i', $cleanKtp)) {
+        // 4. If KTP column had Badge / Emp Code (e.g. "Emp Code : 37647", "Badge No 50064").
+        //    Only when it carries an actual number: generic text such as "Temp Pass"
+        //    is shared by many different offenders and must not become an identity.
+        if (! $isDummyText && preg_match('/(?:Badge|Emp|GTP|Pass)/i', $cleanKtp) && preg_match('/\d/', $cleanKtp)) {
             $badgeFound = $cleanKtp;
             if (empty($cleanBadge)) {
                 $cleanBadge = $badgeFound;
             }
             $cleanCode = strtoupper((string) preg_replace('/[^A-Za-z0-9]/', '', $badgeFound));
+
             return [
                 'id_type' => 'ktp',
-                'id_number' => 'NOKTP-' . ($cleanCode ?: 'BADGE'),
+                'id_number' => self::syntheticId($cleanCode ?: 'BADGE'),
                 'badge_code' => $cleanBadge,
                 'has_real_id' => false,
             ];
@@ -670,15 +694,12 @@ class MasterImportService
 
         // 5. No real KTP available: Fallback to non-KTP identifier
         $badgeForId = $cleanBadge ?: $extractedBadge;
-        if (! empty($badgeForId)) {
-            $badgeClean = strtoupper((string) preg_replace('/[^A-Za-z0-9]/', '', $badgeForId));
-            $syntheticId = 'NOKTP-' . substr($badgeClean, 0, 30);
+        $badgeClean = strtoupper((string) preg_replace('/[^A-Za-z0-9]/', '', (string) $badgeForId));
+        if ($badgeClean !== '' && preg_match('/\d/', $badgeClean)) {
+            $syntheticId = self::syntheticId($badgeClean);
         } else {
             $nameClean = strtoupper((string) preg_replace('/[^A-Za-z0-9]/', '', $name));
-            if ($nameClean === '') {
-                $nameClean = 'OFFENDER';
-            }
-            $syntheticId = 'NOKTP-' . substr($nameClean, 0, 30);
+            $syntheticId = self::syntheticId($nameClean !== '' ? $nameClean : 'OFFENDER');
         }
 
         return [
@@ -690,9 +711,21 @@ class MasterImportService
     }
 
     /**
+     * Build the placeholder identity for an offender without a real document.
+     *
+     * Written in the same spelling the Visitor model stores (IdentityNumber
+     * strips dashes), otherwise lookups by id_number never match the saved row
+     * and the insert collides with the (id_type, id_number) unique index.
+     */
+    private static function syntheticId(string $code): string
+    {
+        return IdentityNumber::normalize('NOKTP'.substr($code, 0, 30));
+    }
+
+    /**
      * Analyze a row: check requirements, identify key, find DB match.
      *
-     * @param array<string, mixed> $row
+     * @param  array<string, mixed>  $row
      * @return array{
      *   identifier: string,
      *   error?: string,
@@ -715,6 +748,7 @@ class MasterImportService
                 }
 
                 $existing = VisitorCard::withTrashed()->where('card_no', (string) $cardNo)->first();
+
                 return [
                     'identifier' => (string) $cardNo,
                     'is_duplicate' => $existing !== null,
@@ -739,6 +773,7 @@ class MasterImportService
                 }
 
                 $existing = VehicleCard::withTrashed()->where('card_no', (string) $cardNo)->first();
+
                 return [
                     'identifier' => (string) $cardNo,
                     'is_duplicate' => $existing !== null,
@@ -777,6 +812,7 @@ class MasterImportService
                 }
 
                 $existing = Staff::withTrashed()->where('staff_id', (string) $staffId)->first();
+
                 return [
                     'identifier' => (string) $staffId,
                     'is_duplicate' => $existing !== null,
@@ -805,7 +841,7 @@ class MasterImportService
                 if (! in_array($locType, $allowedTypes)) {
                     return [
                         'identifier' => (string) $name,
-                        'error' => "Baris #{$rowNum}: Tipe '{$locType}' tidak valid. Pilihan: " . implode(', ', $allowedTypes),
+                        'error' => "Baris #{$rowNum}: Tipe '{$locType}' tidak valid. Pilihan: ".implode(', ', $allowedTypes),
                         'is_duplicate' => false,
                     ];
                 }
@@ -845,9 +881,9 @@ class MasterImportService
                     if (! empty($remark) && ! preg_match('/^(?:see|refer|banned|warning|sd\/|asl\/|terminated|not available|urgent)/i', $remark)) {
                         $name = $remark;
                     } elseif (! empty($rawBadge)) {
-                        $name = 'Offender (' . $rawBadge . ')';
+                        $name = 'Offender ('.$rawBadge.')';
                     } elseif (! empty($rawKtp)) {
-                        $name = 'Offender (' . $rawKtp . ')';
+                        $name = 'Offender ('.$rawKtp.')';
                     } else {
                         return [
                             'identifier' => '-',
@@ -886,7 +922,7 @@ class MasterImportService
                 $isDuplicate = $existing !== null && $existing->is_blacklisted;
 
                 $displayId = $parsedIdentity['has_real_id'] ? $idNumber : (! empty($badgeCode) ? $badgeCode : 'Tanpa KTP');
-                $identifier = $displayId . (! empty($badgeCode) && $parsedIdentity['has_real_id'] ? " ({$badgeCode})" : '');
+                $identifier = $displayId.(! empty($badgeCode) && $parsedIdentity['has_real_id'] ? " ({$badgeCode})" : '');
 
                 return [
                     'identifier' => $identifier,
@@ -933,6 +969,7 @@ class MasterImportService
                         'status' => 'available',
                         'note' => $note,
                     ]);
+
                     return 'created';
                 }
 
@@ -945,6 +982,7 @@ class MasterImportService
                     $model->card_type = $cardType;
                     $model->note = $note;
                     $model->save();
+
                     return 'replaced';
                 }
 
@@ -956,6 +994,7 @@ class MasterImportService
                     $model->note = $note;
                 }
                 $model->save();
+
                 return 'updated';
 
             case self::TYPE_VEHICLE_CARD:
@@ -969,6 +1008,7 @@ class MasterImportService
                         'card_no' => $cardNo,
                         'status' => $status,
                     ]);
+
                     return 'created';
                 }
 
@@ -979,6 +1019,7 @@ class MasterImportService
                 if ($duplicateAction === 'replace') {
                     $model->status = $status;
                     $model->save();
+
                     return 'replaced';
                 }
 
@@ -987,6 +1028,7 @@ class MasterImportService
                     $model->status = $status;
                 }
                 $model->save();
+
                 return 'updated';
 
             case self::TYPE_STAFF:
@@ -1008,6 +1050,7 @@ class MasterImportService
 
                 if (! $isDuplicate || ! $model) {
                     Staff::create($data);
+
                     return 'created';
                 }
 
@@ -1018,6 +1061,7 @@ class MasterImportService
                 if ($duplicateAction === 'replace') {
                     $model->fill($data);
                     $model->save();
+
                     return 'replaced';
                 }
 
@@ -1028,6 +1072,7 @@ class MasterImportService
                     }
                 }
                 $model->save();
+
                 return 'updated';
 
             case self::TYPE_LOCATION:
@@ -1052,6 +1097,7 @@ class MasterImportService
 
                 if (! $isDuplicate || ! $model) {
                     Location::create($data);
+
                     return 'created';
                 }
 
@@ -1062,6 +1108,7 @@ class MasterImportService
                 if ($duplicateAction === 'replace') {
                     $model->fill($data);
                     $model->save();
+
                     return 'replaced';
                 }
 
@@ -1072,6 +1119,7 @@ class MasterImportService
                     }
                 }
                 $model->save();
+
                 return 'updated';
 
             case self::TYPE_BLACKLIST:
@@ -1087,9 +1135,9 @@ class MasterImportService
                     if (! empty($remark) && ! preg_match('/^(?:see|refer|banned|warning|sd\/|asl\/|terminated|not available|urgent)/i', $remark)) {
                         $name = $remark;
                     } elseif (! empty($rawBadge)) {
-                        $name = 'Offender (' . $rawBadge . ')';
+                        $name = 'Offender ('.$rawBadge.')';
                     } elseif (! empty($rawKtp)) {
-                        $name = 'Offender (' . $rawKtp . ')';
+                        $name = 'Offender ('.$rawKtp.')';
                     } else {
                         $name = 'Unknown Offender';
                     }
@@ -1119,6 +1167,18 @@ class MasterImportService
                     'is_blacklisted' => true,
                 ];
 
+                // A row without a real document only carries a NOKTP placeholder.
+                // When it matches a visitor that already has an identity, keep that
+                // identity: overwriting it would wipe a real KTP number and could
+                // collide with another row's placeholder on the unique index.
+                $withoutPlaceholder = function (Visitor $target) use ($data, $parsedIdentity): array {
+                    if (! $parsedIdentity['has_real_id'] && ! empty($target->id_number)) {
+                        unset($data['id_type'], $data['id_number']);
+                    }
+
+                    return $data;
+                };
+
                 if (! $isDuplicate || ! $model) {
                     $existingVisitor = null;
                     if ($parsedIdentity['has_real_id']) {
@@ -1134,23 +1194,26 @@ class MasterImportService
                     }
 
                     if ($existingVisitor) {
-                        $existingVisitor->forceFill($data)->save();
+                        $existingVisitor->forceFill($withoutPlaceholder($existingVisitor))->save();
+
                         return 'created';
                     }
 
-                    $newVisitor = new Visitor();
+                    $newVisitor = new Visitor;
                     $newVisitor->forceFill($data)->save();
+
                     return 'created';
                 }
 
                 if ($duplicateAction === 'replace') {
-                    $model->forceFill($data)->save();
+                    $model->forceFill($withoutPlaceholder($model))->save();
+
                     return 'replaced';
                 }
 
                 // Update
                 $model->name = $name;
-                if ($parsedIdentity['has_real_id'] || ! str_starts_with((string) $model->id_number, 'NOKTP')) {
+                if ($parsedIdentity['has_real_id'] || empty($model->id_number)) {
                     $model->id_type = $idType;
                     $model->id_number = $idNumber;
                 }

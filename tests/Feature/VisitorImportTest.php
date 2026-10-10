@@ -7,6 +7,8 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Str;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xls;
 use Spatie\SimpleExcel\SimpleExcelWriter;
 
 beforeEach(function () {
@@ -34,7 +36,7 @@ function makeXlsxUpload(array $rows): UploadedFile
 function makeXlsUpload(array $rows): UploadedFile
 {
     $path = tempnam(sys_get_temp_dir(), 'vmsimpxls_').'.xls';
-    $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+    $spreadsheet = new Spreadsheet;
     $sheet = $spreadsheet->getActiveSheet();
 
     if (! empty($rows)) {
@@ -46,7 +48,7 @@ function makeXlsUpload(array $rows): UploadedFile
         $sheet->fromArray($data);
     }
 
-    $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xls($spreadsheet);
+    $writer = new Xls($spreadsheet);
     $writer->save($path);
 
     return new UploadedFile($path, 'import.xls', 'application/vnd.ms-excel', null, true);

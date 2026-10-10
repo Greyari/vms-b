@@ -7,6 +7,7 @@ use App\Models\Role;
 use App\Services\ActivityLogger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Spatie\Permission\PermissionRegistrar;
 
 class RoleController extends Controller
 {
@@ -104,7 +105,7 @@ class RoleController extends Controller
         }
 
         // Flush Spatie's cached permissions immediately so changes take effect for all users
-        app()[\Spatie\Permission\PermissionRegistrar::class]->forgetCachedPermissions();
+        app()[PermissionRegistrar::class]->forgetCachedPermissions();
 
         return response()->json($role->load('permissions'));
     }

@@ -7,7 +7,6 @@ use App\Models\VehicleCard;
 use App\Services\MasterImportService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Spatie\SimpleExcel\SimpleExcelReader;
 use Spatie\SimpleExcel\SimpleExcelWriter;
 
 class VehicleCardController extends Controller
@@ -59,9 +58,10 @@ class VehicleCardController extends Controller
 
         try {
             $result = $importService->import(MasterImportService::TYPE_VEHICLE_CARD, $request->file('file'), $duplicateAction);
+
             return response()->json($result);
         } catch (\Throwable $e) {
-            return response()->json(['message' => 'Import failed. ' . $e->getMessage()], 400);
+            return response()->json(['message' => 'Import failed. '.$e->getMessage()], 400);
         }
     }
 
@@ -99,6 +99,7 @@ class VehicleCardController extends Controller
         if ($request->has('page') || $request->has('per_page')) {
             $perPage = (int) $request->input('per_page', 15);
             $perPage = max(1, min($perPage, 100));
+
             return response()->json($query->paginate($perPage));
         }
 

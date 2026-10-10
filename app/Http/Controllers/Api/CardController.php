@@ -5,13 +5,12 @@ namespace App\Http\Controllers\Api;
 use App\Enums\CardType;
 use App\Http\Controllers\Controller;
 use App\Models\VisitorCard;
+use App\Services\MasterImportService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
-use App\Services\MasterImportService;
-use Spatie\SimpleExcel\SimpleExcelReader;
 use Spatie\SimpleExcel\SimpleExcelWriter;
 
 class CardController extends Controller
@@ -68,9 +67,10 @@ class CardController extends Controller
 
         try {
             $result = $importService->import(MasterImportService::TYPE_CARD, $request->file('file'), $duplicateAction);
+
             return response()->json($result);
         } catch (\Throwable $e) {
-            return response()->json(['message' => 'Import failed. ' . $e->getMessage()], 400);
+            return response()->json(['message' => 'Import failed. '.$e->getMessage()], 400);
         }
     }
 
