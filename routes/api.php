@@ -119,8 +119,10 @@ Route::middleware('auth:sanctum')->group(function () {
     // --- Staffs ---------------------------------------------------------
     // Specific routes must precede the apiResource so they aren't captured by {staff}.
     Route::middleware('permission:manage_staffs')->group(function () {
+        Route::get('/staffs/template', [StaffController::class, 'downloadTemplate']);
         Route::get('/staffs/template/download', [StaffController::class, 'downloadTemplate']);
         Route::get('/staffs/export', [StaffController::class, 'export']);
+        Route::post('/staffs/import-preview', [StaffController::class, 'importPreview']);
         Route::post('/staffs/import', [StaffController::class, 'import']);
         Route::get('/staffs/trashed', [StaffController::class, 'trashed']);
         Route::post('/staffs/{id}/restore', [StaffController::class, 'restore']);
@@ -130,8 +132,10 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // --- Cards ----------------------------------------------------------
     Route::middleware('permission:manage_cards')->group(function () {
+        Route::get('/cards/template', [CardController::class, 'downloadTemplate']);
         Route::get('/cards/template/download', [CardController::class, 'downloadTemplate']);
         Route::get('/cards/export', [CardController::class, 'export']);
+        Route::post('/cards/import-preview', [CardController::class, 'importPreview']);
         Route::post('/cards/import', [CardController::class, 'import']);
         Route::get('/cards/trashed', [CardController::class, 'trashed']);
         Route::post('/cards/{id}/restore', [CardController::class, 'restore']);
@@ -141,7 +145,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // --- Vehicle cards --------------------------------------------------
     Route::middleware('permission:manage_cards')->group(function () {
+        Route::get('/vehicle-cards/template', [VehicleCardController::class, 'downloadTemplate']);
         Route::get('/vehicle-cards/template/download', [VehicleCardController::class, 'downloadTemplate']);
+        Route::post('/vehicle-cards/import-preview', [VehicleCardController::class, 'importPreview']);
         Route::post('/vehicle-cards/import', [VehicleCardController::class, 'import']);
         Route::get('/vehicle-cards/trashed', [VehicleCardController::class, 'trashed']);
         Route::post('/vehicle-cards/{id}/restore', [VehicleCardController::class, 'restore']);
@@ -155,6 +161,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/locations/{id}', [LocationController::class, 'show'])->whereUuid('id');
     });
     Route::middleware('permission:manage_locations')->group(function () {
+        Route::get('/locations/template', [LocationController::class, 'downloadTemplate']);
+        Route::get('/locations/template/download', [LocationController::class, 'downloadTemplate']);
+        Route::post('/locations/import-preview', [LocationController::class, 'importPreview']);
+        Route::post('/locations/import', [LocationController::class, 'import']);
         Route::post('/locations', [LocationController::class, 'store']);
         Route::put('/locations/{id}', [LocationController::class, 'update'])->whereUuid('id');
         Route::delete('/locations/{id}', [LocationController::class, 'destroy'])->whereUuid('id');

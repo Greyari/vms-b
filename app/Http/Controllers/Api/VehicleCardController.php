@@ -4,54 +4,44 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\VehicleCard;
+use App\Services\MasterImportService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Spatie\SimpleExcel\SimpleExcelReader;
 use Spatie\SimpleExcel\SimpleExcelWriter;
 
 class VehicleCardController extends Controller
 {
-    public function downloadTemplate()
+    public function downloadTemplate(MasterImportService $importService)
     {
-        return response()->streamDownload(function () {
-            $writer = SimpleExcelWriter::streamDownload('vehicle_card_template.xlsx');
-            $writer->addRow([
-                'card_no' => 'VEHICLE-001',
-                'status' => 'available',
-            ]);
-        }, 'vehicle_card_template.xlsx');
+        return $importService->downloadTemplate(MasterImportService::TYPE_VEHICLE_CARD);
     }
 
-    public function import(Request $request)
+    public function importPreview(Request $request, MasterImportService $importService): JsonResponse
     {
         $request->validate([
-            'file' => 'required|file|mimes:xlsx,csv',
+            'file' => 'required|file|mimes:xlsx,csv|max:5120',
         ]);
 
+        $result = $importService->preview(MasterImportService::TYPE_VEHICLE_CARD, $request->file('file'));
+
+        return response()->json($result);
+    }
+
+    public function import(Request $request, MasterImportService $importService): JsonResponse
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,csv|max:5120',
+            'duplicate_action' => 'nullable|string|in:update,replace',
+        ]);
+
+        $duplicateAction = $request->input('duplicate_action', 'update');
+
         try {
-            $file = $request->file('file');
-            $extension = $file->getClientOriginalExtension();
-
-            $rows = SimpleExcelReader::create($file->getRealPath(), $extension)->getRows();
-
-            $count = 0;
-            $rows->each(function (array $rowProperties) use (&$count) {
-                if (! array_key_exists('card_no', $rowProperties) || ! array_key_exists('status', $rowProperties)) {
-                    throw new \Exception('Invalid formatting');
-                }
-                $status = in_array(strtolower((string) $rowProperties['status']), ['available', 'in_use'])
-                            ? strtolower((string) $rowProperties['status'])
-                            : 'available';
-
-                VehicleCard::updateOrCreate(
-                    ['card_no' => $rowProperties['card_no']],
-                    ['status' => $status]
-                );
-                $count++;
-            });
-
-            return response()->json(['message' => "Successfully imported {$count} vehicle cards."]);
-        } catch (\Exception $e) {
-            return response()->json(['message' => 'Import failed. Please make sure the format is correct.'], 400);
+            $result = $importService->import(MasterImportService::TYPE_VEHICLE_CARD, $request->file('file'), $duplicateAction);
+            return response()->json($result);
+        } catch (\Throwable $e) {
+            return response()->json(['message' => 'Import failed. ' . $e->getMessage()], 400);
         }
     }
 

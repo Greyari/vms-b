@@ -21,6 +21,11 @@ class UserController extends Controller
 
     public function store(Request $request)
     {
+        if ($request->has('role') && ! $request->has('roles')) {
+            $roleInput = $request->input('role');
+            $request->merge(['roles' => is_array($roleInput) ? $roleInput : (empty($roleInput) ? [] : [$roleInput])]);
+        }
+
         // One spelling per username (App\Support\Username), so the unique rule
         // compares the stored form.
         if (is_string($request->input('username'))) {
@@ -67,6 +72,11 @@ class UserController extends Controller
     public function update(Request $request, $id)
     {
         $user = User::findOrFail($id);
+
+        if ($request->has('role') && ! $request->has('roles')) {
+            $roleInput = $request->input('role');
+            $request->merge(['roles' => is_array($roleInput) ? $roleInput : (empty($roleInput) ? [] : [$roleInput])]);
+        }
 
         if (is_string($request->input('username'))) {
             $request->merge(['username' => Username::normalize($request->input('username'))]);

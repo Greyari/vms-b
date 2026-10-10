@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Support\Username;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
@@ -19,18 +20,35 @@ class ProfileController extends Controller
     {
         $user = $request->user();
 
-        // An account signed in by username may have no email; one that has no
-        // username still needs its email.
+        if (is_string($request->input('username'))) {
+            $request->merge(['username' => Username::normalize($request->input('username'))]);
+        }
+
+        $newUsername = $request->has('username') ? $request->input('username') : $user->username;
+        $newEmail = $request->has('email') ? $request->input('email') : $user->email;
+
+        if (empty($newUsername) && empty($newEmail)) {
+            throw ValidationException::withMessages([
+                'username' => ['At least one of username or email is required.'],
+            ]);
+        }
+
         $validated = $request->validate([
             'name' => 'required|string|max:255',
+            'username' => [
+                'nullable', 'string', 'max:255', 'regex:/^[A-Za-z0-9._-]+$/',
+                Rule::unique('users', 'username')->ignore($user->id),
+            ],
             'email' => [
-                Rule::requiredIf($user->username === null),
                 'nullable', 'string', 'email', 'max:255',
                 Rule::unique('users', 'email')->ignore($user->id),
             ],
         ]);
 
         $user->name = $validated['name'];
+        if (array_key_exists('username', $validated)) {
+            $user->username = $validated['username'];
+        }
         if (array_key_exists('email', $validated)) {
             $user->email = $validated['email'];
         }

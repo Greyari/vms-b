@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Staff;
+use App\Services\MasterImportService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -13,49 +14,36 @@ use Spatie\SimpleExcel\SimpleExcelWriter;
 
 class StaffController extends Controller
 {
-    public function downloadTemplate()
+    public function downloadTemplate(MasterImportService $importService)
     {
-        return response()->streamDownload(function () {
-            $writer = SimpleExcelWriter::streamDownload('staff_template.xlsx');
-            $writer->addRow([
-                'staff_id' => 'ID-001',
-                'name' => 'John Doe',
-                'department' => 'IT',
-            ]);
-        }, 'staff_template.xlsx');
+        return $importService->downloadTemplate(MasterImportService::TYPE_STAFF);
     }
 
-    public function import(Request $request)
+    public function importPreview(Request $request, MasterImportService $importService): JsonResponse
     {
         $request->validate([
-            'file' => 'required|file|mimes:xlsx,csv',
+            'file' => 'required|file|mimes:xlsx,csv|max:5120',
         ]);
 
+        $result = $importService->preview(MasterImportService::TYPE_STAFF, $request->file('file'));
+
+        return response()->json($result);
+    }
+
+    public function import(Request $request, MasterImportService $importService): JsonResponse
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,csv|max:5120',
+            'duplicate_action' => 'nullable|string|in:update,replace',
+        ]);
+
+        $duplicateAction = $request->input('duplicate_action', 'update');
+
         try {
-            $file = $request->file('file');
-            $extension = $file->getClientOriginalExtension();
-
-            $rows = SimpleExcelReader::create($file->getRealPath(), $extension)->getRows();
-
-            $count = 0;
-            $rows->each(function (array $rowProperties) use (&$count) {
-                if (! isset($rowProperties['staff_id']) || ! isset($rowProperties['name']) || ! isset($rowProperties['department'])) {
-                    throw new \Exception('Invalid formatting');
-                }
-
-                Staff::updateOrCreate(
-                    ['staff_id' => $rowProperties['staff_id']],
-                    [
-                        'name' => $rowProperties['name'],
-                        'department' => $rowProperties['department'],
-                    ]
-                );
-                $count++;
-            });
-
-            return response()->json(['message' => "Successfully imported {$count} staffs."]);
-        } catch (\Exception $e) {
-            return response()->json(['message' => 'Import failed. Please make sure the format is correct.'], 400);
+            $result = $importService->import(MasterImportService::TYPE_STAFF, $request->file('file'), $duplicateAction);
+            return response()->json($result);
+        } catch (\Throwable $e) {
+            return response()->json(['message' => 'Import failed. ' . $e->getMessage()], 400);
         }
     }
 

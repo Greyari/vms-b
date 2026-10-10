@@ -6,6 +6,7 @@ use App\Enums\LocationType;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\LocationRequest;
 use App\Models\Location;
+use App\Services\MasterImportService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -13,6 +14,39 @@ use Illuminate\Validation\Rule;
 
 class LocationController extends Controller
 {
+    public function downloadTemplate(MasterImportService $importService)
+    {
+        return $importService->downloadTemplate(MasterImportService::TYPE_LOCATION);
+    }
+
+    public function importPreview(Request $request, MasterImportService $importService): JsonResponse
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,csv|max:5120',
+        ]);
+
+        $result = $importService->preview(MasterImportService::TYPE_LOCATION, $request->file('file'));
+
+        return response()->json($result);
+    }
+
+    public function import(Request $request, MasterImportService $importService): JsonResponse
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,csv|max:5120',
+            'duplicate_action' => 'nullable|string|in:update,replace',
+        ]);
+
+        $duplicateAction = $request->input('duplicate_action', 'update');
+
+        try {
+            $result = $importService->import(MasterImportService::TYPE_LOCATION, $request->file('file'), $duplicateAction);
+            return response()->json($result);
+        } catch (\Throwable $e) {
+            return response()->json(['message' => 'Import failed. ' . $e->getMessage()], 400);
+        }
+    }
+
     public function index(Request $request): JsonResponse
     {
         $request->validate([

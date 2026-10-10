@@ -104,3 +104,24 @@ it('rejects an update that clears both username and email', function () {
 
     expect($user->fresh()->email)->toBe('both@vms.local');
 });
+
+it('lets a user update their username through profile and upper-cases it', function () {
+    $user = User::factory()->create(['username' => 'OLDUSER', 'email' => 'user@vms.local']);
+    $user->assignRole('security');
+    actingAsUser($user);
+
+    $this->putJson('/api/profile', ['name' => $user->name, 'username' => 'newuser99'])->assertOk();
+
+    expect($user->fresh()->username)->toBe('NEWUSER99');
+});
+
+it('rejects a duplicate username on profile update', function () {
+    User::factory()->create(['username' => 'TAKENUSER']);
+    $user = User::factory()->create(['username' => 'MYUSER', 'email' => 'my@vms.local']);
+    $user->assignRole('security');
+    actingAsUser($user);
+
+    $this->putJson('/api/profile', ['name' => $user->name, 'username' => 'takenuser'])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors(['username']);
+});

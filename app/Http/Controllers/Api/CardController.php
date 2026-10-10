@@ -10,6 +10,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use App\Services\MasterImportService;
 use Spatie\SimpleExcel\SimpleExcelReader;
 use Spatie\SimpleExcel\SimpleExcelWriter;
 
@@ -20,44 +21,36 @@ class CardController extends Controller
         'status.prohibited' => 'Card status is set by check-in and check-out, not by hand.',
     ];
 
-    public function downloadTemplate()
+    public function downloadTemplate(MasterImportService $importService)
     {
-        return response()->streamDownload(function () {
-            $writer = SimpleExcelWriter::streamDownload('card_template.xlsx');
-            $writer->addRow(['card_no' => 'CARD-001']);
-        }, 'card_template.xlsx');
+        return $importService->downloadTemplate(MasterImportService::TYPE_CARD);
     }
 
-    public function import(Request $request)
+    public function importPreview(Request $request, MasterImportService $importService): JsonResponse
     {
         $request->validate([
-            'file' => 'required|file|mimes:xlsx,csv',
+            'file' => 'required|file|mimes:xlsx,csv|max:5120',
         ]);
 
+        $result = $importService->preview(MasterImportService::TYPE_CARD, $request->file('file'));
+
+        return response()->json($result);
+    }
+
+    public function import(Request $request, MasterImportService $importService): JsonResponse
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,csv|max:5120',
+            'duplicate_action' => 'nullable|string|in:update,replace',
+        ]);
+
+        $duplicateAction = $request->input('duplicate_action', 'update');
+
         try {
-            $file = $request->file('file');
-            $extension = $file->getClientOriginalExtension();
-
-            $rows = SimpleExcelReader::create($file->getRealPath(), $extension)->getRows();
-
-            $count = 0;
-            $rows->each(function (array $rowProperties) use (&$count) {
-                if (! array_key_exists('card_no', $rowProperties)) {
-                    throw new \Exception('Invalid formatting');
-                }
-
-                // Status belongs to check-in and check-out: a new card starts
-                // available and an existing card keeps the status it has.
-                VisitorCard::firstOrCreate(
-                    ['card_no' => (string) $rowProperties['card_no']],
-                    ['status' => 'available'],
-                );
-                $count++;
-            });
-
-            return response()->json(['message' => "Successfully imported {$count} cards."]);
-        } catch (\Exception $e) {
-            return response()->json(['message' => 'Import failed. Please make sure the format is correct.'], 400);
+            $result = $importService->import(MasterImportService::TYPE_CARD, $request->file('file'), $duplicateAction);
+            return response()->json($result);
+        } catch (\Throwable $e) {
+            return response()->json(['message' => 'Import failed. ' . $e->getMessage()], 400);
         }
     }
 
