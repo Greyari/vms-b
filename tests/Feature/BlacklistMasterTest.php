@@ -406,7 +406,7 @@ class BlacklistMasterTest extends TestCase
         $base = tempnam(sys_get_temp_dir(), 'vms_noktp_');
         $path = $base.'.xlsx';
 
-        $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet;
+        $spreadsheet = new Spreadsheet;
         $spreadsheet->getActiveSheet()->fromArray([
             ['NO', 'NAME OF OFFENDER', 'Badge / H.I.D code', 'KTP NO', 'OFFENCES', 'DATE', 'REMARK', 'COMPANY NAME'],
             ['1', 'Rudi Existing', '12328', 'Badge No 12328', 'Kasus A', '2024-01-01', '', 'PT A'],
@@ -414,10 +414,10 @@ class BlacklistMasterTest extends TestCase
             ['3', 'Tono Temp', '', 'Temp Pass', 'Kasus B', '2024-03-01', '', 'PT B'],
             ['4', 'Sari Temp', '', 'Temp. Pass', 'Kasus C', '2024-04-01', '', 'PT C'],
         ]);
-        (new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet))->save($path);
+        (new Xlsx($spreadsheet))->save($path);
 
         try {
-            $file = new \Illuminate\Http\UploadedFile($path, 'noktp.xlsx', null, null, true);
+            $file = new UploadedFile($path, 'noktp.xlsx', null, null, true);
             $response = $this->actingAs($this->admin, 'sanctum')->postJson('/api/visitors/blacklisted/import', [
                 'file' => $file,
                 'duplicate_action' => 'replace',
