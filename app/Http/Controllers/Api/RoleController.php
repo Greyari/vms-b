@@ -63,19 +63,28 @@ class RoleController extends Controller
     {
         $role = Role::findOrFail($id);
 
-        if ($role->is_builtin) {
-            return $this->refuseBuiltIn();
+        if ($role->is_builtin && $request->filled('name') && $request->input('name') !== $role->name) {
+            return response()->json([
+                'message' => 'Nama role bawaan tidak dapat diubah.',
+            ], 422);
         }
 
-        $validated = $request->validate([
-            'name' => 'required|string|max:255|unique:roles,name,'.$role->id,
+        $rules = [
             'permissions' => 'nullable|array',
             'permissions.*' => 'exists:permissions,name',
-        ]);
+        ];
+
+        if (! $role->is_builtin) {
+            $rules['name'] = 'required|string|max:255|unique:roles,name,'.$role->id;
+        }
+
+        $validated = $request->validate($rules);
+
+        if (! $role->is_builtin && isset($validated['name'])) {
+            $role->update(['name' => $validated['name']]);
+        }
 
         $oldPermissions = $role->permissions()->pluck('name')->toArray();
-
-        $role->update(['name' => $validated['name']]);
 
         if (isset($validated['permissions'])) {
             $role->syncPermissions($validated['permissions']);
@@ -93,6 +102,9 @@ class RoleController extends Controller
                 );
             }
         }
+
+        // Flush Spatie's cached permissions immediately so changes take effect for all users
+        app()[\Spatie\Permission\PermissionRegistrar::class]->forgetCachedPermissions();
 
         return response()->json($role->load('permissions'));
     }

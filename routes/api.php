@@ -111,7 +111,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::middleware('permission:manage_blacklist')->group(function () {
         Route::get('/visitors/blacklisted/export', [VisitorController::class, 'exportBlacklist']);
         Route::get('/visitors/blacklisted/template', [VisitorController::class, 'downloadBlacklistTemplate']);
+        Route::get('/visitors/blacklisted/template/download', [VisitorController::class, 'downloadBlacklistTemplate']);
+        Route::post('/visitors/blacklisted/import-preview', [VisitorController::class, 'importBlacklistPreview']);
         Route::post('/visitors/blacklisted/import', [VisitorController::class, 'importBlacklist']);
+        Route::post('/visitors/blacklisted', [VisitorController::class, 'storeBlacklist']);
+        Route::put('/visitors/blacklisted/{id}', [VisitorController::class, 'updateBlacklist'])->whereUuid('id');
         Route::post('/visitors/{id}/blacklist', [VisitorController::class, 'blacklist']);
         Route::post('/visitors/{id}/unblacklist', [VisitorController::class, 'unblacklist']);
     });
@@ -147,6 +151,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::middleware('permission:manage_cards')->group(function () {
         Route::get('/vehicle-cards/template', [VehicleCardController::class, 'downloadTemplate']);
         Route::get('/vehicle-cards/template/download', [VehicleCardController::class, 'downloadTemplate']);
+        Route::get('/vehicle-cards/export', [VehicleCardController::class, 'export']);
         Route::post('/vehicle-cards/import-preview', [VehicleCardController::class, 'importPreview']);
         Route::post('/vehicle-cards/import', [VehicleCardController::class, 'import']);
         Route::get('/vehicle-cards/trashed', [VehicleCardController::class, 'trashed']);

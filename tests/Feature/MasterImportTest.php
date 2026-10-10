@@ -204,3 +204,41 @@ it('previews and imports locations & vessels', function () {
         @unlink($base);
     }
 });
+
+it('previews and imports cards from legacy xls file', function () {
+    actingAsAdmin();
+
+    $base = tempnam(sys_get_temp_dir(), 'vms_card_xls_');
+    $path = $base.'.xls';
+
+    $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+    $sheet = $spreadsheet->getActiveSheet();
+    $sheet->fromArray([
+        ['card_no', 'card_type', 'note'],
+        ['VC-LEGACY-01', 'visitor', 'Legacy XLS Card'],
+    ]);
+    $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xls($spreadsheet);
+    $writer->save($path);
+
+    try {
+        $file = new UploadedFile($path, 'cards.xls', 'application/vnd.ms-excel', null, true);
+        $preview = $this->postJson('/api/cards/import-preview', ['file' => $file])->assertOk()->json();
+
+        expect($preview['total_rows'])->toBe(1)
+            ->and($preview['new_count'])->toBe(1);
+
+        $import = $this->post('/api/cards/import', [
+            'file' => $file,
+            'duplicate_action' => 'update',
+        ])->assertOk()->json();
+
+        expect($import['success'])->toBe(1)
+            ->and($import['created'])->toBe(1);
+
+        expect(VisitorCard::where('card_no', 'VC-LEGACY-01')->exists())->toBeTrue();
+    } finally {
+        @unlink($path);
+        @unlink($base);
+    }
+});
+

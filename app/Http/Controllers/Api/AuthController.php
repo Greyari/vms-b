@@ -43,6 +43,16 @@ class AuthController extends Controller
         }
 
         $user = Auth::user();
+
+        if (! $user->is_active) {
+            Auth::logout();
+            ActivityLogger::logEvent('login_failed', ['login' => $login, 'reason' => 'inactive_account']);
+
+            return response()->json([
+                'message' => 'Akun Anda berstatus nonaktif. Silakan hubungi administrator.',
+            ], 403);
+        }
+
         $token = $user->createToken('auth_token')->plainTextToken;
 
         ActivityLogger::logEvent('login');

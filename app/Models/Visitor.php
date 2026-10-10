@@ -25,6 +25,7 @@ class Visitor extends Model
         'visitor_type', 'gender', 'birth_date', 'birth_place', 'nationality', 'occupation', 'phone',
         'id_issued_at', 'id_expires_at', 'id_lifetime',
         'vessel_id', 'certificate', 'certificate_no', 'seaman_book_no', 'seaman_book_expires_at',
+        'badge_code', 'offences', 'blacklisted_at', 'remark',
     ];
 
     /**
@@ -50,6 +51,7 @@ class Visitor extends Model
             'id_expires_at' => 'date',
             'id_lifetime' => 'boolean',
             'seaman_book_expires_at' => 'date',
+            'blacklisted_at' => 'date',
         ];
     }
 

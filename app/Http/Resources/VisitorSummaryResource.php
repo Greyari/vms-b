@@ -33,6 +33,11 @@ class VisitorSummaryResource extends JsonResource
             'visitor_type' => $this->visitor_type,
             'is_blacklisted' => $this->is_blacklisted,
             'blacklist_reason' => $this->blacklist_reason,
+            'badge_code' => $this->badge_code,
+            'offences' => $this->offences ?? $this->blacklist_reason,
+            'date' => $this->blacklisted_at?->format('Y-m-d') ?? $this->created_at?->format('Y-m-d'),
+            'blacklisted_at' => $this->blacklisted_at?->format('Y-m-d') ?? $this->created_at?->format('Y-m-d'),
+            'remark' => $this->remark,
             'visits_count' => $this->whenCounted('visits'),
         ];
     }

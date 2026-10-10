@@ -41,6 +41,7 @@ class UserController extends Controller
             // creates, so a request without roles crashed with a 500.
             'roles' => 'required|array|min:1',
             'roles.*' => 'exists:roles,name',
+            'is_active' => 'sometimes|boolean',
         ]);
 
         $user = User::create([
@@ -48,6 +49,7 @@ class UserController extends Controller
             'username' => $validated['username'] ?? null,
             'email' => $validated['email'] ?? null,
             'password' => Hash::make($validated['password']),
+            'is_active' => $validated['is_active'] ?? true,
         ]);
 
         $user->assignRole($validated['roles']);
@@ -89,6 +91,7 @@ class UserController extends Controller
             'password' => 'nullable|string|min:8',
             'roles' => 'nullable|array',
             'roles.*' => 'exists:roles,name',
+            'is_active' => 'sometimes|boolean',
         ]);
 
         $oldRoles = $user->roles()->pluck('name')->toArray();
@@ -103,6 +106,9 @@ class UserController extends Controller
         }
         if (! empty($validated['password'])) {
             $user->password = Hash::make($validated['password']);
+        }
+        if (array_key_exists('is_active', $validated)) {
+            $user->is_active = (bool) $validated['is_active'];
         }
         $user->save();
 

@@ -20,7 +20,17 @@ class VehicleCardController extends Controller
     public function importPreview(Request $request, MasterImportService $importService): JsonResponse
     {
         $request->validate([
-            'file' => 'required|file|mimes:xlsx,csv|max:5120',
+            'file' => [
+                'required',
+                'file',
+                'max:10240',
+                function ($attribute, $value, $fail) {
+                    $ext = strtolower($value->getClientOriginalExtension());
+                    if (! in_array($ext, ['xlsx', 'xls', 'csv'], true)) {
+                        $fail('The file field must be a file of type: xlsx, xls, csv.');
+                    }
+                },
+            ],
         ]);
 
         $result = $importService->preview(MasterImportService::TYPE_VEHICLE_CARD, $request->file('file'));
@@ -31,7 +41,17 @@ class VehicleCardController extends Controller
     public function import(Request $request, MasterImportService $importService): JsonResponse
     {
         $request->validate([
-            'file' => 'required|file|mimes:xlsx,csv|max:5120',
+            'file' => [
+                'required',
+                'file',
+                'max:10240',
+                function ($attribute, $value, $fail) {
+                    $ext = strtolower($value->getClientOriginalExtension());
+                    if (! in_array($ext, ['xlsx', 'xls', 'csv'], true)) {
+                        $fail('The file field must be a file of type: xlsx, xls, csv.');
+                    }
+                },
+            ],
             'duplicate_action' => 'nullable|string|in:update,replace',
         ]);
 
@@ -45,19 +65,73 @@ class VehicleCardController extends Controller
         }
     }
 
-    public function index()
+    private function filteredQuery(Request $request)
     {
-        return response()->json(VehicleCard::all());
+        $query = VehicleCard::query();
+
+        $search = trim((string) $request->input('search', ''));
+        if ($search !== '') {
+            $term = '%'.strtolower(addcslashes($search, '%_\\')).'%';
+            $query->whereRaw('LOWER(card_no) LIKE ?', [$term]);
+        }
+
+        $from = trim((string) ($request->input('from') ?? $request->input('card_no_from') ?? ''));
+        if ($from !== '') {
+            $query->whereRaw('LOWER(card_no) >= ?', [strtolower($from)]);
+        }
+
+        $to = trim((string) ($request->input('to') ?? $request->input('card_no_to') ?? ''));
+        if ($to !== '') {
+            $query->whereRaw('LOWER(card_no) <= ?', [strtolower($to)]);
+        }
+
+        if ($request->filled('status')) {
+            $query->where('status', $request->input('status'));
+        }
+
+        return $query;
+    }
+
+    public function index(Request $request)
+    {
+        $query = $this->filteredQuery($request)->orderBy('card_no');
+
+        if ($request->has('page') || $request->has('per_page')) {
+            $perPage = (int) $request->input('per_page', 15);
+            $perPage = max(1, min($perPage, 100));
+            return response()->json($query->paginate($perPage));
+        }
+
+        return response()->json($query->get());
+    }
+
+    public function export(Request $request)
+    {
+        $query = $this->filteredQuery($request)->orderBy('card_no');
+
+        return response()->streamDownload(function () use ($query) {
+            $writer = SimpleExcelWriter::streamDownload('vehicle_cards.xlsx');
+            $query->lazyById(1000)->each(function (VehicleCard $card) use ($writer): void {
+                $writer->addRow([
+                    'Card No' => $card->card_no,
+                    'Status' => $card->status,
+                    'Created At' => $card->created_at?->toDateTimeString(),
+                ]);
+            });
+        }, 'vehicle_cards.xlsx');
     }
 
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'card_no' => 'required|string|unique:vehicle_cards,card_no',
-            'status' => 'required|in:available,in_use',
+            'card_no' => 'required|string|max:255|unique:vehicle_cards,card_no',
+            'status' => 'nullable|in:available,in_use',
         ]);
 
-        $card = VehicleCard::create($validated);
+        $card = VehicleCard::create([
+            'card_no' => $validated['card_no'],
+            'status' => $validated['status'] ?? 'available',
+        ]);
 
         return response()->json($card, 201);
     }
@@ -73,11 +147,14 @@ class VehicleCardController extends Controller
     {
         $card = VehicleCard::findOrFail($id);
         $validated = $request->validate([
-            'card_no' => 'required|string|unique:vehicle_cards,card_no,'.$card->id,
-            'status' => 'required|in:available,in_use',
+            'card_no' => 'required|string|max:255|unique:vehicle_cards,card_no,'.$card->id,
+            'status' => 'nullable|in:available,in_use',
         ]);
 
-        $card->update($validated);
+        $card->update([
+            'card_no' => $validated['card_no'],
+            'status' => $validated['status'] ?? $card->status,
+        ]);
 
         return response()->json($card);
     }

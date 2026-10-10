@@ -13,7 +13,10 @@ class ProfileController extends Controller
 {
     public function show(Request $request)
     {
-        return response()->json($request->user()->load('roles'));
+        $user = $request->user()->load('roles');
+        $user->setRelation('permissions', $user->getAllPermissions());
+
+        return response()->json($user);
     }
 
     public function update(Request $request)
@@ -54,9 +57,12 @@ class ProfileController extends Controller
         }
         $user->save();
 
+        $user->load('roles');
+        $user->setRelation('permissions', $user->getAllPermissions());
+
         return response()->json([
             'message' => 'Profile updated successfully',
-            'user' => $user->load('roles'),
+            'user' => $user,
         ]);
     }
 

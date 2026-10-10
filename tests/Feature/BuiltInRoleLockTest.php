@@ -8,16 +8,18 @@ use App\Models\Role;
  * seed; the API refuses it instead, and the SPA shows these roles read-only.
  */
 
-it('refuses to change a built-in role', function (string $name) {
+it('refuses to rename a built-in role but allows updating permissions', function (string $name) {
     actingAsAdmin();
     $role = Role::findByName($name);
-    $before = $role->permissions->pluck('name')->sort()->values()->all();
+
+    $this->putJson("/api/roles/{$role->id}", ['name' => $name.'_modified', 'permissions' => ['view_visits']])
+        ->assertStatus(422)
+        ->assertJsonPath('message', 'Nama role bawaan tidak dapat diubah.');
 
     $this->putJson("/api/roles/{$role->id}", ['name' => $name, 'permissions' => ['view_visits']])
-        ->assertStatus(422)
-        ->assertJsonPath('message', 'Built-in roles cannot be changed or deleted.');
+        ->assertOk();
 
-    expect($role->fresh()->permissions->pluck('name')->sort()->values()->all())->toBe($before);
+    expect($role->fresh()->hasPermissionTo('view_visits'))->toBeTrue();
 })->with(['administrator', 'supervisor', 'security']);
 
 it('refuses to delete a built-in role', function (string $name) {

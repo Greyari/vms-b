@@ -31,6 +31,27 @@ function makeXlsxUpload(array $rows): UploadedFile
     return new UploadedFile($path, 'import.xlsx', null, null, true);
 }
 
+function makeXlsUpload(array $rows): UploadedFile
+{
+    $path = tempnam(sys_get_temp_dir(), 'vmsimpxls_').'.xls';
+    $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+    $sheet = $spreadsheet->getActiveSheet();
+
+    if (! empty($rows)) {
+        $header = array_keys($rows[0]);
+        $data = [$header];
+        foreach ($rows as $r) {
+            $data[] = array_values($r);
+        }
+        $sheet->fromArray($data);
+    }
+
+    $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xls($spreadsheet);
+    $writer->save($path);
+
+    return new UploadedFile($path, 'import.xls', 'application/vnd.ms-excel', null, true);
+}
+
 it('imports a valid visitor spreadsheet and creates rows', function () {
     $file = makeXlsxUpload([
         ['ID Type' => 'ktp', 'ID Number' => '6210000000000001', 'Name' => 'Import One', 'Company' => 'PT A'],
@@ -43,6 +64,20 @@ it('imports a valid visitor spreadsheet and creates rows', function () {
     expect($response->json('created'))->toBe(2);
     expect(Visitor::where('id_number', '6210000000000001')->exists())->toBeTrue();
     expect(Visitor::where('id_number', 'A1234567')->where('id_type', 'passport')->exists())->toBeTrue();
+});
+
+it('imports a valid visitor legacy xls spreadsheet and creates rows', function () {
+    $file = makeXlsUpload([
+        ['ID Type' => 'ktp', 'ID Number' => '6210000000000008', 'Name' => 'Import XLS One', 'Company' => 'PT XLS A'],
+        ['ID Type' => 'passport', 'ID Number' => 'B9876543', 'Name' => 'Import XLS Two', 'Company' => 'PT XLS B'],
+    ]);
+
+    $response = $this->post('/api/visitors/import', ['file' => $file]);
+
+    $response->assertOk();
+    expect($response->json('created'))->toBe(2);
+    expect(Visitor::where('id_number', '6210000000000008')->exists())->toBeTrue();
+    expect(Visitor::where('id_number', 'B9876543')->where('id_type', 'passport')->exists())->toBeTrue();
 });
 
 it('skips a numeric (integer) ID cell — IDs must be text-formatted (M5)', function () {

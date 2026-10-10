@@ -22,7 +22,17 @@ class LocationController extends Controller
     public function importPreview(Request $request, MasterImportService $importService): JsonResponse
     {
         $request->validate([
-            'file' => 'required|file|mimes:xlsx,csv|max:5120',
+            'file' => [
+                'required',
+                'file',
+                'max:10240',
+                function ($attribute, $value, $fail) {
+                    $ext = strtolower($value->getClientOriginalExtension());
+                    if (! in_array($ext, ['xlsx', 'xls', 'csv'], true)) {
+                        $fail('The file field must be a file of type: xlsx, xls, csv.');
+                    }
+                },
+            ],
         ]);
 
         $result = $importService->preview(MasterImportService::TYPE_LOCATION, $request->file('file'));
@@ -33,7 +43,17 @@ class LocationController extends Controller
     public function import(Request $request, MasterImportService $importService): JsonResponse
     {
         $request->validate([
-            'file' => 'required|file|mimes:xlsx,csv|max:5120',
+            'file' => [
+                'required',
+                'file',
+                'max:10240',
+                function ($attribute, $value, $fail) {
+                    $ext = strtolower($value->getClientOriginalExtension());
+                    if (! in_array($ext, ['xlsx', 'xls', 'csv'], true)) {
+                        $fail('The file field must be a file of type: xlsx, xls, csv.');
+                    }
+                },
+            ],
             'duplicate_action' => 'nullable|string|in:update,replace',
         ]);
 
