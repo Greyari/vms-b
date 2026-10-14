@@ -1,8 +1,12 @@
 <?php
 
+use App\Models\Location;
 use App\Models\Nationality;
+use App\Models\Staff;
+use App\Models\VehicleCard;
 use App\Models\Visit;
 use App\Models\Visitor;
+use App\Models\VisitorCard;
 
 it('lists nationality names in alphabetical order', function () {
     actingAsSecurity();
@@ -51,6 +55,26 @@ it('lists the card types with their labels', function () {
         ->assertOk()
         ->assertJsonCount(7)
         ->assertJsonFragment(['value' => 'visitor_green', 'label' => 'Visitor (green)']);
+});
+
+it('returns bundled visit form data in a single call', function () {
+    actingAsSecurity();
+    Location::factory()->create(['name' => 'Main Gate', 'is_active' => true]);
+    Staff::factory()->create(['name' => 'John Doe', 'is_active' => true]);
+    VisitorCard::factory()->create(['card_no' => 'CRD-001', 'status' => 'available', 'is_active' => true]);
+    VehicleCard::factory()->create(['card_no' => 'VEH-001', 'status' => 'available']);
+    Visit::factory()->create(['purpose' => 'Inspection', 'date' => now()->toDateString()]);
+
+    $response = $this->getJson('/api/lookups/visit-form-data');
+
+    $response->assertOk()
+        ->assertJsonStructure([
+            'locations',
+            'staffs',
+            'cards',
+            'vehicle_cards',
+            'purposes',
+        ]);
 });
 
 it('refuses lookups without a signed-in user', function () {

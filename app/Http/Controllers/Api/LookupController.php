@@ -4,11 +4,16 @@ namespace App\Http\Controllers\Api;
 
 use App\Enums\CardType;
 use App\Http\Controllers\Controller;
+use App\Models\Location;
 use App\Models\Nationality;
+use App\Models\Staff;
+use App\Models\VehicleCard;
 use App\Models\Visit;
 use App\Models\Visitor;
+use App\Models\VisitorCard;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 
 /**
  * Suggestions for form fields. Any signed-in user may read them: they hold no
@@ -47,8 +52,8 @@ class LookupController extends Controller
 
     public function purposes(): JsonResponse
     {
-        return response()->json(
-            Visit::query()
+        $purposes = Cache::remember('lookup_visit_purposes', 300, function () {
+            return Visit::query()
                 ->where('date', '>=', now()->subDays(90)->toDateString())
                 ->whereNotNull('purpose')
                 ->where('purpose', '!=', '')
@@ -57,7 +62,59 @@ class LookupController extends Controller
                 ->orderBy('purpose')
                 ->limit(self::LIMIT)
                 ->pluck('purpose')
-        );
+                ->values();
+        });
+
+        return response()->json($purposes);
+    }
+
+    public function visitFormData(): JsonResponse
+    {
+        $locations = Location::query()
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->select(['id', 'name', 'code', 'type', 'is_active'])
+            ->get();
+
+        $staffs = Staff::query()
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->select(['id', 'name', 'department', 'is_active'])
+            ->get();
+
+        $cards = VisitorCard::query()
+            ->where('is_active', true)
+            ->where('status', 'available')
+            ->orderBy('card_no')
+            ->select(['id', 'card_no', 'status', 'card_type'])
+            ->get();
+
+        $vehicleCards = VehicleCard::query()
+            ->where('status', 'available')
+            ->orderBy('card_no')
+            ->select(['id', 'card_no', 'status'])
+            ->get();
+
+        $purposes = Cache::remember('lookup_visit_purposes', 300, function () {
+            return Visit::query()
+                ->where('date', '>=', now()->subDays(90)->toDateString())
+                ->whereNotNull('purpose')
+                ->where('purpose', '!=', '')
+                ->groupBy('purpose')
+                ->orderByRaw('COUNT(*) DESC')
+                ->orderBy('purpose')
+                ->limit(self::LIMIT)
+                ->pluck('purpose')
+                ->values();
+        });
+
+        return response()->json([
+            'locations' => $locations,
+            'staffs' => $staffs,
+            'cards' => $cards,
+            'vehicle_cards' => $vehicleCards,
+            'purposes' => $purposes,
+        ]);
     }
 
     public function cardTypes(): JsonResponse

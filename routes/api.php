@@ -48,6 +48,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/companies', [LookupController::class, 'companies']);
         Route::get('/purposes', [LookupController::class, 'purposes']);
         Route::get('/card-types', [LookupController::class, 'cardTypes']);
+        Route::get('/visit-form-data', [LookupController::class, 'visitFormData']);
     });
 
     // --- Visits (read) --------------------------------------------------
