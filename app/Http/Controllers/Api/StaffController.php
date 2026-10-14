@@ -74,26 +74,14 @@ class StaffController extends Controller
         return response()->json($this->filteredStaff($request)->orderBy('name')->paginate($perPage));
     }
 
-    public function export(Request $request)
+    public function export(Request $request, \App\Services\MasterExportService $exportService)
     {
-        $staff = $this->filteredStaff($request)->orderBy('name')->get();
+        return $exportService->export('staffs', $request);
+    }
 
-        return response()->streamDownload(function () use ($staff) {
-            $writer = SimpleExcelWriter::streamDownload('staff.xlsx');
-            foreach ($staff as $member) {
-                $writer->addRow([
-                    'Staff ID' => $member->staff_id,
-                    'Name' => $member->name,
-                    'Gender' => $member->gender,
-                    'Birth Date' => $member->birth_date?->format('Y-m-d'),
-                    'Company' => $member->company,
-                    'Department' => $member->department,
-                    'Occupation' => $member->occupation,
-                    'Address' => $member->address,
-                    'Status' => $member->is_active ? 'Active' : 'Inactive',
-                ]);
-            }
-        }, 'staff.xlsx');
+    public function exportCount(Request $request, \App\Services\MasterExportService $exportService): JsonResponse
+    {
+        return response()->json(['count' => $exportService->count('staffs', $request)]);
     }
 
     public function store(Request $request)

@@ -10,6 +10,7 @@ use App\Http\Resources\VisitorSummaryResource;
 use App\Http\Resources\VisitResource;
 use App\Models\Visit;
 use App\Models\Visitor;
+use App\Services\MasterExportService;
 use App\Services\MasterImportService;
 use App\Support\IdentityNumber;
 use App\Support\NumberingRetry;
@@ -299,145 +300,22 @@ class VisitorController extends Controller
      * filters. Rows stream in chunks: the imported registry holds some
      * 150,000 visitors, too many to load at once.
      */
-    public function export(Request $request)
+    public function export(Request $request, MasterExportService $exportService)
     {
-        $visitors = $this->filteredVisitors($request, false)->with('vessel');
-
-        return response()->streamDownload(function () use ($visitors) {
-            $writer = SimpleExcelWriter::streamDownload('visitors.xlsx');
-            $visitors->lazyById(1000)->each(function (Visitor $v) use ($writer): void {
-                $writer->addRow([
-                    'Visitor No' => $v->visitor_no,
-                    'Name' => $v->name,
-                    'ID Type' => strtoupper($v->id_type),
-                    'ID Number' => $v->id_number,
-                    'Visitor Type' => $v->visitor_type?->value,
-                    'Gender' => $v->gender,
-                    'Birth Date' => $v->birth_date?->format('Y-m-d'),
-                    'Birth Place' => $v->birth_place,
-                    'Nationality' => $v->nationality,
-                    'Occupation' => $v->occupation,
-                    'Phone' => $v->phone,
-                    'Company' => $v->company,
-                    'ID Issued' => $v->id_issued_at?->format('Y-m-d'),
-                    'ID Expires' => $v->id_lifetime ? 'Lifetime' : $v->id_expires_at?->format('Y-m-d'),
-                    'Vessel' => $v->vessel?->code,
-                    'Certificate' => $v->certificate,
-                    'Certificate No' => $v->certificate_no,
-                    'Seaman Book No' => $v->seaman_book_no,
-                    'Seaman Book Expires' => $v->seaman_book_expires_at?->format('Y-m-d'),
-                ]);
-            });
-        }, 'visitors.xlsx');
+        return $exportService->export('visitors', $request);
     }
 
-    public function downloadTemplate()
+    public function exportCount(Request $request, MasterExportService $exportService): JsonResponse
     {
-        return response()->streamDownload(function () {
-            $writer = SimpleExcelWriter::streamDownload('visitor_template.xlsx');
-            $writer->addRow([
-                'ID Type' => 'ktp',
-                'ID Number' => '1234567890123456',
-                'Name' => 'John Doe',
-                'Company' => 'PT Example',
-            ]);
-        }, 'visitor_template.xlsx');
+        return response()->json(['count' => $exportService->count('visitors', $request)]);
     }
 
-    /**
-     * Normalize a spreadsheet "ID Number" cell to a plain string. Numeric
-     * cells arrive as int/float from the reader (e.g. a KTP typed as a number
-     * loses leading behaviour / gains scientific notation) — coerce them back
-     * to their literal digit string before validation.
-     */
-    private function normalizeIdNumber(mixed $value): string
+    public function downloadTemplate(MasterImportService $importService)
     {
-        // IDs must arrive as TEXT. A numeric-formatted cell (int or float) may
-        // already have been rounded by the spreadsheet before we ever saw it
-        // (Excel/openspout round past ~15 significant digits, so a 16-digit KTP
-        // typed as a number silently changes value), corrupting the identity
-        // and, on a blacklist import, admitting a blacklisted person. Refuse all
-        // numerics — the row is skipped and the operator is told to use Text.
-        if (is_int($value) || is_float($value)) {
-            return '';
-        }
-
-        return trim((string) $value);
+        return $importService->downloadTemplate(MasterImportService::TYPE_VISITOR);
     }
 
-    /**
-     * Read up to the configured row cap into memory, aborting (returning a 422
-     * response) the moment the file exceeds it so a runaway upload can't be
-     * processed inside one long transaction.
-     *
-     * @return array<int, array<string, mixed>>|JsonResponse
-     */
-    private function readImportRows(UploadedFile $file)
-    {
-        $maxRows = (int) config('vms.import_max_rows', 2000);
-        $extension = strtolower($file->getClientOriginalExtension());
-
-        if ($extension === 'xls') {
-            try {
-                $spreadsheet = IOFactory::load($file->getRealPath());
-                $worksheet = $spreadsheet->getActiveSheet();
-                $data = $worksheet->toArray(null, true, true, false);
-
-                if (empty($data)) {
-                    return [];
-                }
-
-                $header = array_shift($data);
-                $rows = [];
-
-                foreach ($data as $rowValues) {
-                    $row = [];
-                    $hasData = false;
-
-                    foreach ($header as $colIdx => $colName) {
-                        $colNameStr = trim((string) $colName);
-                        if ($colNameStr === '') {
-                            continue;
-                        }
-                        $val = $rowValues[$colIdx] ?? null;
-                        if ($val !== null && trim((string) $val) !== '') {
-                            $hasData = true;
-                        }
-                        $row[$colNameStr] = $val;
-                    }
-
-                    if ($hasData) {
-                        $rows[] = $row;
-                        if (count($rows) > $maxRows) {
-                            return response()->json([
-                                'message' => "Import aborted: the file exceeds the maximum of {$maxRows} rows.",
-                            ], 422);
-                        }
-                    }
-                }
-
-                return $rows;
-            } catch (\Throwable $e) {
-                return response()->json([
-                    'message' => 'Failed to read XLS file: '.$e->getMessage(),
-                ], 422);
-            }
-        }
-
-        $rows = [];
-        foreach (SimpleExcelReader::create($file->getRealPath(), $file->getClientOriginalExtension())->getRows() as $row) {
-            $rows[] = $row;
-            if (count($rows) > $maxRows) {
-                return response()->json([
-                    'message' => "Import aborted: the file exceeds the maximum of {$maxRows} rows.",
-                ], 422);
-            }
-        }
-
-        return $rows;
-    }
-
-    public function import(Request $request)
+    public function importPreview(Request $request, MasterImportService $importService): JsonResponse
     {
         $request->validate([
             'file' => [
@@ -453,87 +331,47 @@ class VisitorController extends Controller
             ],
         ]);
 
-        $rows = $this->readImportRows($request->file('file'));
-        if ($rows instanceof JsonResponse) {
-            return $rows;
-        }
+        $result = $importService->preview(MasterImportService::TYPE_VISITOR, $request->file('file'));
 
-        return $this->runImportWithRetry(function () use ($rows): JsonResponse {
-            $created = 0;
-            $updated = 0;
-            $skipped = 0;
-            $errors = [];
-
-            foreach ($rows as $index => $row) {
-                $line = $index + 2; // account for the header row
-
-                $idNumber = IdentityNumber::normalize($this->normalizeIdNumber($row['ID Number'] ?? null));
-                if ($idNumber === '' || ! preg_match('/^[0-9A-Z]+$/', $idNumber)) {
-                    $skipped++;
-                    $errors[] = "Row {$line}: missing or invalid ID Number (numeric-formatted ID cells are refused — format the ID column as Text and re-upload).";
-
-                    continue;
-                }
-
-                $idType = strtolower(trim((string) ($row['ID Type'] ?? '')));
-                if (! in_array($idType, ['ktp', 'sim', 'passport'], true)) {
-                    $skipped++;
-                    $errors[] = "Row {$line}: unknown ID Type '{$idType}' (expected ktp, sim or passport).";
-
-                    continue;
-                }
-
-                $name = trim((string) ($row['Name'] ?? ''));
-                if ($name === '') {
-                    $skipped++;
-                    $errors[] = "Row {$line}: missing Name.";
-
-                    continue;
-                }
-
-                $company = trim((string) ($row['Company'] ?? ''));
-
-                $visitor = Visitor::updateOrCreate(
-                    ['id_type' => $idType, 'id_number' => $idNumber],
-                    ['name' => $name, 'company' => $company === '' ? null : $company],
-                );
-
-                $visitor->wasRecentlyCreated ? $created++ : $updated++;
-            }
-
-            return response()->json([
-                'message' => "Import completed. {$created} created, {$updated} updated, {$skipped} skipped.",
-                'created' => $created,
-                'updated' => $updated,
-                'skipped' => $skipped,
-                'errors' => array_slice($errors, 0, 20),
-            ]);
-        });
+        return response()->json($result);
     }
 
-    /**
-     * Runs one import attempt through NumberingRetry: inside its own
-     * transaction, retried — the whole attempt, transaction included — when it
-     * lost a visitor_no allocation race (see Visitor::nextVisitorNo()). Any
-     * other unique violation ends the import at once, and every failure is
-     * reported to the log. Shared by import() and importBlacklist().
-     *
-     * $attempt must be self-contained: it (re-)initializes its own created/
-     * updated/skipped/errors counters on every call — a retried attempt never
-     * inherits state from the one that was just rolled back, so a lost race
-     * is never double-counted — and it returns the success JsonResponse
-     * itself, which is returned unchanged on a successful attempt.
-     *
-     * @param  callable(): JsonResponse  $attempt
-     */
-    private function runImportWithRetry(callable $attempt): JsonResponse
+    private function normalizeIdNumber(mixed $value): string
     {
+        if (is_int($value) || is_float($value)) {
+            return '';
+        }
+        if ($value === null) {
+            return '';
+        }
+
+        return trim((string) $value);
+    }
+
+    public function import(Request $request, MasterImportService $importService): JsonResponse
+    {
+        $request->validate([
+            'file' => [
+                'required',
+                'file',
+                'max:10240',
+                function ($attribute, $value, $fail) {
+                    $ext = strtolower($value->getClientOriginalExtension());
+                    if (! in_array($ext, ['xlsx', 'xls', 'csv'], true)) {
+                        $fail('The file field must be a file of type: xlsx, xls, csv.');
+                    }
+                },
+            ],
+            'duplicate_action' => 'nullable|string|in:update,replace',
+        ]);
+
+        $duplicateAction = $request->input('duplicate_action', 'update');
+
         try {
-            return NumberingRetry::run($attempt);
+            $result = $importService->import(MasterImportService::TYPE_VISITOR, $request->file('file'), $duplicateAction);
+
+            return response()->json($result);
         } catch (UniqueConstraintViolationException $e) {
-            // The exception carries SQL with the file's data: the client gets
-            // a fixed message and the log keeps the detail. A violation that is
-            // still retryable here means every attempt lost the race.
             report($e);
 
             return response()->json([
@@ -542,6 +380,19 @@ class VisitorController extends Controller
                     ? 'Could not allocate a unique visitor number, please retry.'
                     : 'The file conflicts with an existing record.',
             ], 500);
+        } catch (ValidationException $e) {
+            $msg = $e->validator ? $e->validator->errors()->first('file') : $e->getMessage();
+
+            return response()->json([
+                'message' => $msg ?: $e->getMessage(),
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Throwable $e) {
+            if (str_contains($e->getMessage(), 'exceeds the maximum')) {
+                return response()->json(['message' => $e->getMessage()], 422);
+            }
+
+            return response()->json(['message' => 'Import failed. '.$e->getMessage()], 400);
         }
     }
 
@@ -667,29 +518,16 @@ class VisitorController extends Controller
         ]);
     }
 
-    public function exportBlacklist(Request $request)
+    public function exportBlacklist(Request $request, MasterExportService $exportService)
     {
-        $visitors = $this->filteredVisitors($request, true)->orderBy('name')->get();
+        return $exportService->export('blacklist', $request);
+    }
 
-        return response()->streamDownload(function () use ($visitors) {
-            $writer = SimpleExcelWriter::streamDownload('blacklisted_visitors.xlsx');
-            $no = 1;
-            foreach ($visitors as $visitor) {
-                $displayKtp = ($visitor->id_number && ! str_starts_with($visitor->id_number, 'NOKTP'))
-                    ? $visitor->id_number
-                    : '';
-                $writer->addRow([
-                    'NO' => $no++,
-                    'NAME OF OFFENDER' => $visitor->name,
-                    'Badge / H.I.D code' => $visitor->badge_code ?? '',
-                    'KTP NO' => $displayKtp,
-                    'OFFENCES' => $visitor->offences ?? $visitor->blacklist_reason ?? '',
-                    'DATE' => $visitor->blacklisted_at ? $visitor->blacklisted_at->format('Y-m-d') : ($visitor->created_at ? $visitor->created_at->format('Y-m-d') : ''),
-                    'REMARK' => $visitor->remark ?? '',
-                    'COMPANY NAME' => $visitor->company ?? '',
-                ]);
-            }
-        }, 'blacklisted_visitors.xlsx');
+    public function exportBlacklistCount(Request $request, MasterExportService $exportService): JsonResponse
+    {
+        return response()->json([
+            'count' => $exportService->count('blacklist', $request),
+        ]);
     }
 
     public function downloadBlacklistTemplate(MasterImportService $importService)

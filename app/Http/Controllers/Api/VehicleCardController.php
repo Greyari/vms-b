@@ -106,20 +106,14 @@ class VehicleCardController extends Controller
         return response()->json($query->get());
     }
 
-    public function export(Request $request)
+    public function export(Request $request, \App\Services\MasterExportService $exportService)
     {
-        $query = $this->filteredQuery($request)->orderBy('card_no');
+        return $exportService->export('vehicle_cards', $request);
+    }
 
-        return response()->streamDownload(function () use ($query) {
-            $writer = SimpleExcelWriter::streamDownload('vehicle_cards.xlsx');
-            $query->lazyById(1000)->each(function (VehicleCard $card) use ($writer): void {
-                $writer->addRow([
-                    'Card No' => $card->card_no,
-                    'Status' => $card->status,
-                    'Created At' => $card->created_at?->toDateTimeString(),
-                ]);
-            });
-        }, 'vehicle_cards.xlsx');
+    public function exportCount(Request $request, \App\Services\MasterExportService $exportService): JsonResponse
+    {
+        return response()->json(['count' => $exportService->count('vehicle_cards', $request)]);
     }
 
     public function store(Request $request)

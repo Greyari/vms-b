@@ -34,6 +34,8 @@ class MasterImportService
 
     public const TYPE_BLACKLIST = 'blacklist';
 
+    public const TYPE_VISITOR = 'visitor';
+
     /**
      * Generate template Excel stream download for specified master data.
      */
@@ -142,6 +144,41 @@ class MasterImportService
                         'COMPANY NAME' => 'PT Mitra Sejahtera',
                     ]);
                 }, 'template_blacklist.xlsx');
+
+            case self::TYPE_VISITOR:
+                return response()->streamDownload(function () {
+                    $writer = SimpleExcelWriter::streamDownload('template_visitors.xlsx');
+                    $writer->addRow([
+                        'name' => 'Budi Santoso',
+                        'id_type' => 'ktp',
+                        'id_number' => '2171012345670001',
+                        'company' => 'PT Pelayaran Mandiri',
+                        'occupation' => 'Teknisi Kapal',
+                        'visitor_type' => 'visitor',
+                        'phone' => '081234567890',
+                        'email' => 'budi.santoso@example.com',
+                        'gender' => 'male',
+                        'birth_date' => '1990-05-20',
+                        'birth_place' => 'Batam',
+                        'nationality' => 'Indonesia',
+                        'address' => 'Jl. Duyung No. 12, Batam',
+                    ]);
+                    $writer->addRow([
+                        'name' => 'Michael Chang',
+                        'id_type' => 'passport',
+                        'id_number' => 'E98765432',
+                        'company' => 'Global Marine Survey',
+                        'occupation' => 'Marine Inspector',
+                        'visitor_type' => 'supplier',
+                        'phone' => '+6591234567',
+                        'email' => 'michael@example.com',
+                        'gender' => 'male',
+                        'birth_date' => '1985-11-12',
+                        'birth_place' => 'Singapore',
+                        'nationality' => 'Singaporean',
+                        'address' => '10 Marina Boulevard, Singapore',
+                    ]);
+                }, 'template_visitors.xlsx');
 
             default:
                 throw new \InvalidArgumentException("Unknown import type: {$type}");
@@ -306,7 +343,7 @@ class MasterImportService
                             $replaced++;
                         }
                     } catch (\Throwable $e) {
-                        if (UniqueViolation::isRetryable($e)) {
+                        if ($e instanceof \Illuminate\Database\UniqueConstraintViolationException) {
                             throw $e;
                         }
                         $failed++;
@@ -320,7 +357,7 @@ class MasterImportService
             });
         };
 
-        if ($type === self::TYPE_BLACKLIST) {
+        if ($type === self::TYPE_BLACKLIST || $type === self::TYPE_VISITOR) {
             NumberingRetry::run($attempt);
         } else {
             $attempt();
@@ -328,6 +365,16 @@ class MasterImportService
 
         $success = $created + $updated + $replaced;
         $message = "Import selesai. Berhasil: {$success} (Baru: {$created}, Diperbarui: {$updated}, Diganti: {$replaced}), Gagal: {$failed}.";
+
+        ActivityLogger::logEvent('import_master', [
+            'type' => $type,
+            'total' => $total,
+            'success' => $success,
+            'created' => $created,
+            'updated' => $updated,
+            'replaced' => $replaced,
+            'failed' => $failed,
+        ]);
 
         return [
             'message' => $message,
@@ -339,6 +386,7 @@ class MasterImportService
             'failed' => $failed,
             'skipped' => $failed,
             'failed_details' => $failedDetails,
+            'errors' => array_map(fn ($d) => $d['reason'], $failedDetails),
         ];
     }
 
@@ -375,7 +423,7 @@ class MasterImportService
                 $rows[] = $row;
                 if (count($rows) > $maxRows) {
                     throw ValidationException::withMessages([
-                        'file' => ["File melebihi batas maksimum {$maxRows} baris."],
+                        'file' => ["Import aborted: the file exceeds the maximum of {$maxRows} rows."],
                     ]);
                 }
             }
@@ -426,7 +474,7 @@ class MasterImportService
                 $rows[] = $row;
                 if (count($rows) > $maxRows) {
                     throw ValidationException::withMessages([
-                        'file' => ["File melebihi batas maksimum {$maxRows} baris."],
+                        'file' => ["Import aborted: the file exceeds the maximum of {$maxRows} rows."],
                     ]);
                 }
             }
@@ -940,6 +988,93 @@ class MasterImportService
                     ] : null,
                 ];
 
+            case self::TYPE_VISITOR:
+                $rawIdVal = $row['id_number'] ?? ($row['ktp_no'] ?? ($row['no_ktp'] ?? ($row['nik'] ?? null)));
+                if (is_int($rawIdVal) || is_float($rawIdVal)) {
+                    return [
+                        'identifier' => '-',
+                        'error' => "Row {$rowNum}: missing or invalid ID Number (numeric-formatted ID cells are refused — format the ID column as Text and re-upload).",
+                        'is_duplicate' => false,
+                    ];
+                }
+
+                $name = self::extractRowValue($row, ['name', 'nama', 'full_name', 'nama_lengkap']);
+                $rawIdType = strtolower(self::extractRowValue($row, ['id_type', 'tipe_identitas', 'jenis_id'], ''));
+                $idNumber = self::extractRowValue($row, ['id_number', 'nomor_identitas', 'no_ktp', 'nik', 'ktp_no', 'passport_no']);
+
+                if (empty($idNumber) || ! preg_match('/^[0-9A-Za-z\s\.\-_]+$/', $idNumber)) {
+                    return [
+                        'identifier' => '-',
+                        'error' => "Row {$rowNum}: missing or invalid ID Number (numeric-formatted ID cells are refused — format the ID column as Text and re-upload).",
+                        'is_duplicate' => false,
+                    ];
+                }
+
+                $validIdTypes = ['ktp', 'passport', 'sim', 'other'];
+                if ($rawIdType === '' || ! in_array($rawIdType, $validIdTypes, true)) {
+                    return [
+                        'identifier' => '-',
+                        'error' => "Row {$rowNum}: unknown ID Type '{$rawIdType}' (expected ktp, sim or passport).",
+                        'is_duplicate' => false,
+                    ];
+                }
+                $idType = $rawIdType;
+
+                if (empty($name)) {
+                    return [
+                        'identifier' => '-',
+                        'error' => "Row {$rowNum}: missing Name.",
+                        'is_duplicate' => false,
+                    ];
+                }
+
+                $normalizedId = IdentityNumber::normalize($idNumber);
+
+                $rawGender = self::extractRowValue($row, ['gender', 'jenis_kelamin']);
+                if (! empty($rawGender) && ! in_array(strtolower($rawGender), ['male', 'female', 'laki-laki', 'perempuan'], true)) {
+                    return [
+                        'identifier' => "{$idType}: {$normalizedId}",
+                        'error' => "Baris #{$rowNum}: Nilai gender '{$rawGender}' tidak valid (gunakan male / female).",
+                        'is_duplicate' => false,
+                    ];
+                }
+
+                $rawVisitorType = self::extractRowValue($row, ['visitor_type', 'tipe_pengunjung']);
+                $allowedVisitorTypes = ['visitor', 'crew', 'temporary_worker', 'supplier', 'others'];
+                if (! empty($rawVisitorType)) {
+                    $normVisitorType = strtolower($rawVisitorType);
+                    if ($normVisitorType === 'regular') {
+                        $normVisitorType = 'visitor';
+                    }
+                    if (! in_array($normVisitorType, $allowedVisitorTypes, true)) {
+                        return [
+                            'identifier' => "{$idType}: {$normalizedId}",
+                            'error' => "Baris #{$rowNum}: Nilai visitor_type '{$rawVisitorType}' tidak valid. Pilihan: ".implode(', ', $allowedVisitorTypes),
+                            'is_duplicate' => false,
+                        ];
+                    }
+                }
+
+                $existing = Visitor::where('id_type', $idType)->where('id_number', $normalizedId)->first();
+
+                return [
+                    'identifier' => "{$idType}: {$normalizedId}",
+                    'is_duplicate' => $existing !== null,
+                    'existing_model' => $existing,
+                    'existing_data' => $existing ? [
+                        'id' => $existing->id,
+                        'visitor_no' => $existing->visitor_no,
+                        'name' => $existing->name,
+                        'id_type' => $existing->id_type,
+                        'id_number' => $existing->id_number,
+                        'company' => $existing->company,
+                        'occupation' => $existing->occupation,
+                        'phone' => $existing->phone,
+                        'email' => $existing->email,
+                        'address' => $existing->address,
+                    ] : null,
+                ];
+
             default:
                 throw new \InvalidArgumentException("Unknown type: {$type}");
         }
@@ -1234,6 +1369,79 @@ class MasterImportService
                     $model->company = $company;
                 }
                 $model->is_blacklisted = true;
+                $model->save();
+
+                return 'updated';
+
+            case self::TYPE_VISITOR:
+                $name = self::extractRowValue($row, ['name', 'nama', 'full_name', 'nama_lengkap']);
+                $rawIdType = strtolower(self::extractRowValue($row, ['id_type', 'tipe_identitas', 'jenis_id'], 'ktp'));
+                if (! in_array($rawIdType, ['ktp', 'passport', 'sim', 'other'], true)) {
+                    $rawIdType = 'ktp';
+                }
+                $idNumber = IdentityNumber::normalize(self::extractRowValue($row, ['id_number', 'nomor_identitas', 'no_ktp', 'nik', 'ktp_no', 'passport_no']));
+                $company = self::extractRowValue($row, ['company', 'perusahaan']);
+                $occupation = self::extractRowValue($row, ['occupation', 'jabatan', 'profesi']);
+                $phone = self::extractRowValue($row, ['phone', 'telepon', 'no_hp']);
+                $email = self::extractRowValue($row, ['email', 'surel']);
+                $birthPlace = self::extractRowValue($row, ['birth_place', 'tempat_lahir']);
+                $rawBirthDate = self::extractRowValue($row, ['birth_date', 'tanggal_lahir', 'tgl_lahir']);
+                $birthDate = self::parseDate($rawBirthDate);
+                $nationality = self::extractRowValue($row, ['nationality', 'kewarganegaraan'], 'Indonesia');
+                $address = self::extractRowValue($row, ['address', 'alamat', 'alamat_domisili']);
+
+                $rawGender = strtolower(self::extractRowValue($row, ['gender', 'jenis_kelamin']));
+                $gender = null;
+                if (in_array($rawGender, ['female', 'perempuan', 'wanita'], true)) {
+                    $gender = 'female';
+                } elseif (in_array($rawGender, ['male', 'laki-laki', 'pria'], true)) {
+                    $gender = 'male';
+                }
+
+                $rawVisitorType = strtolower(self::extractRowValue($row, ['visitor_type', 'tipe_pengunjung'], 'visitor'));
+                if ($rawVisitorType === 'regular') {
+                    $rawVisitorType = 'visitor';
+                }
+                if (! in_array($rawVisitorType, ['visitor', 'crew', 'temporary_worker', 'supplier', 'others'], true)) {
+                    $rawVisitorType = 'visitor';
+                }
+
+                $data = [
+                    'name' => $name,
+                    'id_type' => $rawIdType,
+                    'id_number' => $idNumber,
+                    'company' => $company !== '' ? $company : null,
+                    'occupation' => $occupation !== '' ? $occupation : null,
+                    'phone' => $phone !== '' ? $phone : null,
+                    'email' => $email !== '' ? $email : null,
+                    'birth_place' => $birthPlace !== '' ? $birthPlace : null,
+                    'birth_date' => $birthDate,
+                    'nationality' => $nationality !== '' ? $nationality : 'Indonesia',
+                    'gender' => $gender,
+                    'visitor_type' => $rawVisitorType,
+                    'address' => $address !== '' ? $address : null,
+                ];
+
+                if (! $isDuplicate || ! $model) {
+                    $visitor = new Visitor();
+                    $visitor->forceFill($data);
+                    $visitor->save();
+
+                    return 'created';
+                }
+
+                if ($duplicateAction === 'replace') {
+                    $model->forceFill($data)->save();
+
+                    return 'replaced';
+                }
+
+                // Update mode
+                foreach ($data as $k => $v) {
+                    if ($v !== null && $v !== '') {
+                        $model->{$k} = $v;
+                    }
+                }
                 $model->save();
 
                 return 'updated';

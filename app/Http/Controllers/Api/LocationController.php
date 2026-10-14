@@ -6,6 +6,7 @@ use App\Enums\LocationType;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\LocationRequest;
 use App\Models\Location;
+use App\Services\MasterExportService;
 use App\Services\MasterImportService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
@@ -14,6 +15,16 @@ use Illuminate\Validation\Rule;
 
 class LocationController extends Controller
 {
+    public function export(Request $request, MasterExportService $exportService)
+    {
+        return $exportService->export('locations', $request);
+    }
+
+    public function exportCount(Request $request, MasterExportService $exportService): JsonResponse
+    {
+        return response()->json(['count' => $exportService->count('locations', $request)]);
+    }
+
     public function downloadTemplate(MasterImportService $importService)
     {
         return $importService->downloadTemplate(MasterImportService::TYPE_LOCATION);

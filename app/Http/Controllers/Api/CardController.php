@@ -81,23 +81,14 @@ class CardController extends Controller
         return response()->json($this->filteredCards($request)->orderBy('card_no')->paginate($perPage));
     }
 
-    public function export(Request $request)
+    public function export(Request $request, \App\Services\MasterExportService $exportService)
     {
-        $cards = $this->filteredCards($request)->orderBy('card_no');
+        return $exportService->export('cards', $request);
+    }
 
-        return response()->streamDownload(function () use ($cards) {
-            $writer = SimpleExcelWriter::streamDownload('cards.xlsx');
-            $cards->lazy(1000)->each(function (VisitorCard $card) use ($writer): void {
-                $writer->addRow([
-                    'Card No' => $card->card_no,
-                    'Absenteeism No' => $card->absenteeism_no,
-                    'Card Type' => $card->card_type?->value,
-                    'Note' => $card->note,
-                    'Active' => $card->is_active ? 'Yes' : 'No',
-                    'Status' => $card->status,
-                ]);
-            });
-        }, 'cards.xlsx');
+    public function exportCount(Request $request, \App\Services\MasterExportService $exportService): JsonResponse
+    {
+        return response()->json(['count' => $exportService->count('cards', $request)]);
     }
 
     public function store(Request $request)

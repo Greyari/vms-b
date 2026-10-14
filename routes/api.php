@@ -103,7 +103,11 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::middleware('permission:manage_visitors')->group(function () {
         Route::get('/visitors/export', [VisitorController::class, 'export']);
+        Route::get('/visitors/export/count', [VisitorController::class, 'exportCount']);
+        Route::get('/visitors/export-count', [VisitorController::class, 'exportCount']);
         Route::get('/visitors/template', [VisitorController::class, 'downloadTemplate']);
+        Route::get('/visitors/template/download', [VisitorController::class, 'downloadTemplate']);
+        Route::post('/visitors/import-preview', [VisitorController::class, 'importPreview']);
         Route::post('/visitors/import', [VisitorController::class, 'import']);
         Route::put('/visitors/{id}', [VisitorController::class, 'update']);
         Route::delete('/visitors/{id}', [VisitorController::class, 'destroy']);
@@ -111,6 +115,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::middleware('permission:manage_blacklist')->group(function () {
         Route::get('/visitors/blacklisted/export', [VisitorController::class, 'exportBlacklist']);
+        Route::get('/visitors/blacklisted/export/count', [VisitorController::class, 'exportBlacklistCount']);
+        Route::get('/visitors/blacklisted/export-count', [VisitorController::class, 'exportBlacklistCount']);
         Route::get('/visitors/blacklisted/template', [VisitorController::class, 'downloadBlacklistTemplate']);
         Route::get('/visitors/blacklisted/template/download', [VisitorController::class, 'downloadBlacklistTemplate']);
         Route::post('/visitors/blacklisted/import-preview', [VisitorController::class, 'importBlacklistPreview']);
@@ -127,6 +133,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/staffs/template', [StaffController::class, 'downloadTemplate']);
         Route::get('/staffs/template/download', [StaffController::class, 'downloadTemplate']);
         Route::get('/staffs/export', [StaffController::class, 'export']);
+        Route::get('/staffs/export/count', [StaffController::class, 'exportCount']);
+        Route::get('/staffs/export-count', [StaffController::class, 'exportCount']);
         Route::post('/staffs/import-preview', [StaffController::class, 'importPreview']);
         Route::post('/staffs/import', [StaffController::class, 'import']);
         Route::get('/staffs/trashed', [StaffController::class, 'trashed']);
@@ -140,6 +148,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/cards/template', [CardController::class, 'downloadTemplate']);
         Route::get('/cards/template/download', [CardController::class, 'downloadTemplate']);
         Route::get('/cards/export', [CardController::class, 'export']);
+        Route::get('/cards/export/count', [CardController::class, 'exportCount']);
+        Route::get('/cards/export-count', [CardController::class, 'exportCount']);
         Route::post('/cards/import-preview', [CardController::class, 'importPreview']);
         Route::post('/cards/import', [CardController::class, 'import']);
         Route::get('/cards/trashed', [CardController::class, 'trashed']);
@@ -153,6 +163,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/vehicle-cards/template', [VehicleCardController::class, 'downloadTemplate']);
         Route::get('/vehicle-cards/template/download', [VehicleCardController::class, 'downloadTemplate']);
         Route::get('/vehicle-cards/export', [VehicleCardController::class, 'export']);
+        Route::get('/vehicle-cards/export/count', [VehicleCardController::class, 'exportCount']);
+        Route::get('/vehicle-cards/export-count', [VehicleCardController::class, 'exportCount']);
         Route::post('/vehicle-cards/import-preview', [VehicleCardController::class, 'importPreview']);
         Route::post('/vehicle-cards/import', [VehicleCardController::class, 'import']);
         Route::get('/vehicle-cards/trashed', [VehicleCardController::class, 'trashed']);
@@ -169,6 +181,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::middleware('permission:manage_locations')->group(function () {
         Route::get('/locations/template', [LocationController::class, 'downloadTemplate']);
         Route::get('/locations/template/download', [LocationController::class, 'downloadTemplate']);
+        Route::get('/locations/export', [LocationController::class, 'export']);
+        Route::get('/locations/export/count', [LocationController::class, 'exportCount']);
+        Route::get('/locations/export-count', [LocationController::class, 'exportCount']);
         Route::post('/locations/import-preview', [LocationController::class, 'importPreview']);
         Route::post('/locations/import', [LocationController::class, 'import']);
         Route::post('/locations', [LocationController::class, 'store']);
