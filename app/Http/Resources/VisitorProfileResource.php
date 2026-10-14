@@ -35,6 +35,8 @@ class VisitorProfileResource extends JsonResource
             'nationality' => $this->nationality,
             'occupation' => $this->occupation,
             'phone' => $this->phone,
+            'email' => $this->email,
+            'address' => $this->address,
             'company' => $this->company,
             'vessel_id' => $this->vessel_id,
             'vessel' => $this->whenLoaded('vessel', fn (): ?array => $this->vessel === null ? null : [
@@ -48,6 +50,7 @@ class VisitorProfileResource extends JsonResource
             'seaman_book_expires_at' => $this->seaman_book_expires_at?->format('Y-m-d'),
             'is_blacklisted' => $this->is_blacklisted,
             'blacklist_reason' => $this->blacklist_reason,
+            'visits' => VisitResource::collection($this->whenLoaded('visits')),
         ];
     }
 }

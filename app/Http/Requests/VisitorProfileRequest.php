@@ -54,6 +54,8 @@ class VisitorProfileRequest extends FormRequest
             'nationality' => ['nullable', 'string', 'max:255'],
             'occupation' => ['nullable', 'string', 'max:255'],
             'phone' => ['nullable', 'string', 'max:255'],
+            'email' => ['nullable', 'email', 'max:255'],
+            'address' => ['nullable', 'string', 'max:1000'],
             'id_issued_at' => ['nullable', 'date'],
             'id_expires_at' => ['nullable', 'date'],
             'id_lifetime' => ['sometimes', 'boolean'],

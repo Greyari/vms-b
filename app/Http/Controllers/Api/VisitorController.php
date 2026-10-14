@@ -105,7 +105,13 @@ class VisitorController extends Controller
      */
     public function show(string $id): JsonResponse
     {
-        $visitor = Visitor::with('vessel')->withCount('visits')->findOrFail($id);
+        $visitor = Visitor::with([
+            'vessel',
+            'visits' => fn ($q) => $q->with(['staff', 'location', 'visitorCards', 'vehicleCard'])
+                ->orderByDesc('date')
+                ->orderByDesc('time_in')
+                ->limit(50),
+        ])->withCount('visits')->findOrFail($id);
 
         return response()->json([
             'visitor' => (new VisitorProfileResource($visitor))->resolve(),
