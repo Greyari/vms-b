@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\CardType;
 use App\Enums\LocationType;
 use App\Enums\VisitorType;
+use App\Models\Blacklist;
 use App\Models\Location;
 use App\Models\Staff;
 use App\Models\VehicleCard;
@@ -61,7 +62,7 @@ class MasterExportService
 
             case 'blacklist':
             case 'blacklisted':
-                $query = \App\Models\Blacklist::query()->where('is_active', true);
+                $query = Blacklist::query()->where('is_active', true);
 
                 $search = trim((string) $request->input('search', ''));
                 if ($search !== '') {
@@ -334,7 +335,7 @@ class MasterExportService
 
             case 'blacklist':
             case 'blacklisted':
-                /** @var \App\Models\Blacklist|\App\Models\Visitor $model */
+                /** @var Blacklist|Visitor $model */
                 $displayKtp = ($model->id_number && ! str_starts_with($model->id_number, 'NOKTP'))
                     ? $model->id_number
                     : '';

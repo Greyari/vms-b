@@ -139,3 +139,45 @@ it('returns blacklisted status and reason for crew candidates', function () {
     expect($data[0]['is_blacklisted'])->toBeTrue();
     expect($data[0]['blacklist_reason'])->toBe('Port infraction');
 });
+
+it('includes crew with unassigned vessel (vessel_id null) and returns company column', function () {
+    actingAsSupervisor();
+    $vessel = Location::factory()->create();
+
+    $unassignedCrew = Visitor::factory()->create([
+        'visitor_type' => VisitorType::Crew->value,
+        'vessel_id' => null,
+        'name' => 'Unassigned Sailor',
+        'company' => 'Ocean Shipping Ltd',
+    ]);
+
+    $response = $this->getJson("/api/vessel-arrivals/crew-candidates?location_id={$vessel->id}")
+        ->assertOk();
+
+    $data = $response->json();
+    $names = collect($data)->pluck('name')->all();
+    expect($names)->toContain('Unassigned Sailor');
+
+    $found = collect($data)->firstWhere('id', $unassignedCrew->id);
+    expect($found['company'])->toBe('Ocean Shipping Ltd');
+});
+
+it('searches crew candidates across system by keyword', function () {
+    actingAsSupervisor();
+    $vessel = Location::factory()->create();
+    $otherVessel = Location::factory()->create();
+
+    Visitor::factory()->crew($otherVessel)->create([
+        'name' => 'Fernando Alonso',
+        'company' => 'Alpine Marine',
+        'id_number' => '1122334455',
+    ]);
+
+    $response = $this->getJson("/api/vessel-arrivals/crew-candidates?location_id={$vessel->id}&search=Alpine")
+        ->assertOk();
+
+    $data = $response->json();
+    expect($data)->toHaveCount(1);
+    expect($data[0]['name'])->toBe('Fernando Alonso');
+    expect($data[0]['company'])->toBe('Alpine Marine');
+});

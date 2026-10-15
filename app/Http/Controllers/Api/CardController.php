@@ -5,13 +5,13 @@ namespace App\Http\Controllers\Api;
 use App\Enums\CardType;
 use App\Http\Controllers\Controller;
 use App\Models\VisitorCard;
+use App\Services\MasterExportService;
 use App\Services\MasterImportService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
-use Spatie\SimpleExcel\SimpleExcelWriter;
 
 class CardController extends Controller
 {
@@ -81,12 +81,12 @@ class CardController extends Controller
         return response()->json($this->filteredCards($request)->orderBy('card_no')->paginate($perPage));
     }
 
-    public function export(Request $request, \App\Services\MasterExportService $exportService)
+    public function export(Request $request, MasterExportService $exportService)
     {
         return $exportService->export('cards', $request);
     }
 
-    public function exportCount(Request $request, \App\Services\MasterExportService $exportService): JsonResponse
+    public function exportCount(Request $request, MasterExportService $exportService): JsonResponse
     {
         return response()->json(['count' => $exportService->count('cards', $request)]);
     }

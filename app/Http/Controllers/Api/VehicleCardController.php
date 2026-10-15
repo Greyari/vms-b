@@ -4,10 +4,10 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\VehicleCard;
+use App\Services\MasterExportService;
 use App\Services\MasterImportService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Spatie\SimpleExcel\SimpleExcelWriter;
 
 class VehicleCardController extends Controller
 {
@@ -106,12 +106,12 @@ class VehicleCardController extends Controller
         return response()->json($query->get());
     }
 
-    public function export(Request $request, \App\Services\MasterExportService $exportService)
+    public function export(Request $request, MasterExportService $exportService)
     {
         return $exportService->export('vehicle_cards', $request);
     }
 
-    public function exportCount(Request $request, \App\Services\MasterExportService $exportService): JsonResponse
+    public function exportCount(Request $request, MasterExportService $exportService): JsonResponse
     {
         return response()->json(['count' => $exportService->count('vehicle_cards', $request)]);
     }

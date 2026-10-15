@@ -21,14 +21,10 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
-use PhpOffice\PhpSpreadsheet\IOFactory;
-use Spatie\SimpleExcel\SimpleExcelReader;
-use Spatie\SimpleExcel\SimpleExcelWriter;
 
 class VisitorController extends Controller
 {
@@ -589,7 +585,7 @@ class VisitorController extends Controller
                 ])->save();
             } else {
                 $visitor = NumberingRetry::run(function () use ($name, $idType, $idNumber, $badgeCode, $offences, $date, $remark, $company) {
-                    $newVisitor = new Visitor();
+                    $newVisitor = new Visitor;
                     $newVisitor->forceFill([
                         'id_type' => $idType,
                         'id_number' => $idNumber,

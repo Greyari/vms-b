@@ -4,12 +4,12 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Staff;
+use App\Services\MasterExportService;
 use App\Services\MasterImportService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
-use Spatie\SimpleExcel\SimpleExcelWriter;
 
 class StaffController extends Controller
 {
@@ -74,12 +74,12 @@ class StaffController extends Controller
         return response()->json($this->filteredStaff($request)->orderBy('name')->paginate($perPage));
     }
 
-    public function export(Request $request, \App\Services\MasterExportService $exportService)
+    public function export(Request $request, MasterExportService $exportService)
     {
         return $exportService->export('staffs', $request);
     }
 
-    public function exportCount(Request $request, \App\Services\MasterExportService $exportService): JsonResponse
+    public function exportCount(Request $request, MasterExportService $exportService): JsonResponse
     {
         return response()->json(['count' => $exportService->count('staffs', $request)]);
     }

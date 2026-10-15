@@ -55,29 +55,50 @@ class VesselArrivalController extends Controller
         $validated = $request->validate([
             'location_id' => ['required', 'uuid', 'exists:locations,id'],
             'vessel_arrival_id' => ['nullable', 'uuid', 'exists:vessel_arrivals,id'],
+            'search' => ['nullable', 'string', 'max:255'],
+            'all' => ['nullable', 'boolean'],
         ]);
 
         $locationId = $validated['location_id'];
         $arrivalId = $validated['vessel_arrival_id'] ?? null;
+        $search = trim((string) ($request->input('search') ?? $request->input('q') ?? ''));
+        $showAll = $request->boolean('all');
 
         $columns = [
-            'id', 'visitor_no', 'name', 'id_type', 'id_number',
+            'id', 'visitor_no', 'name', 'id_type', 'id_number', 'company',
             'gender', 'occupation', 'nationality', 'certificate',
             'certificate_no', 'seaman_book_no', 'is_blacklisted', 'blacklist_reason',
         ];
 
-        $candidates = Visitor::query()
+        $candidatesQuery = Visitor::query()
             ->select($columns)
-            ->where('visitor_type', 'crew')
-            ->where(function ($query) use ($locationId, $arrivalId) {
-                $query->where('vessel_id', $locationId);
+            ->where('visitor_type', 'crew');
+
+        if (! $showAll && $search === '') {
+            $candidatesQuery->where(function ($query) use ($locationId, $arrivalId) {
+                $query->where('vessel_id', $locationId)
+                    ->orWhereNull('vessel_id');
 
                 if ($arrivalId !== null) {
                     $query->orWhereHas('vesselArrivals', function ($subQuery) use ($arrivalId) {
                         $subQuery->where('vessel_arrivals.id', $arrivalId);
                     });
                 }
-            })
+            });
+        }
+
+        if ($search !== '') {
+            $term = '%'.strtolower($search).'%';
+            $candidatesQuery->where(function ($sub) use ($term) {
+                $sub->whereRaw('LOWER(name) LIKE ?', [$term])
+                    ->orWhereRaw('LOWER(id_number) LIKE ?', [$term])
+                    ->orWhereRaw('LOWER(COALESCE(company, \'\')) LIKE ?', [$term])
+                    ->orWhereRaw('LOWER(COALESCE(seaman_book_no, \'\')) LIKE ?', [$term])
+                    ->orWhereRaw('LOWER(COALESCE(occupation, \'\')) LIKE ?', [$term]);
+            });
+        }
+
+        $candidates = $candidatesQuery
             ->distinct()
             ->orderBy('name', 'asc')
             ->get();

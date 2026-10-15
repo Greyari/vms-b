@@ -11,8 +11,8 @@ use App\Models\Visitor;
 use App\Models\VisitorCard;
 use App\Support\IdentityNumber;
 use App\Support\NumberingRetry;
-use App\Support\UniqueViolation;
 use Carbon\Carbon;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -343,7 +343,7 @@ class MasterImportService
                             $replaced++;
                         }
                     } catch (\Throwable $e) {
-                        if ($e instanceof \Illuminate\Database\UniqueConstraintViolationException) {
+                        if ($e instanceof UniqueConstraintViolationException) {
                             throw $e;
                         }
                         $failed++;
@@ -1423,7 +1423,7 @@ class MasterImportService
                 ];
 
                 if (! $isDuplicate || ! $model) {
-                    $visitor = new Visitor();
+                    $visitor = new Visitor;
                     $visitor->forceFill($data);
                     $visitor->save();
 
