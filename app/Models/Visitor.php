@@ -113,4 +113,14 @@ class Visitor extends Model
             ->using(VesselArrivalCrew::class)
             ->withTimestamps();
     }
+
+    public function blacklists()
+    {
+        return $this->hasMany(Blacklist::class)->orderBy('blacklisted_at', 'desc');
+    }
+
+    public function activeBlacklist()
+    {
+        return $this->hasOne(Blacklist::class)->where('is_active', true)->latestOfMany('blacklisted_at');
+    }
 }

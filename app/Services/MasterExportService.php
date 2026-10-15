@@ -61,7 +61,7 @@ class MasterExportService
 
             case 'blacklist':
             case 'blacklisted':
-                $query = Visitor::query()->where('is_blacklisted', true);
+                $query = \App\Models\Blacklist::query()->where('is_active', true);
 
                 $search = trim((string) $request->input('search', ''));
                 if ($search !== '') {
@@ -334,21 +334,22 @@ class MasterExportService
 
             case 'blacklist':
             case 'blacklisted':
-                /** @var Visitor $model */
+                /** @var \App\Models\Blacklist|\App\Models\Visitor $model */
                 $displayKtp = ($model->id_number && ! str_starts_with($model->id_number, 'NOKTP'))
                     ? $model->id_number
                     : '';
 
+                $dateVal = $model->blacklisted_at ? $model->blacklisted_at->format('Y-m-d') : ($model->created_at ? $model->created_at->format('Y-m-d') : '');
+
                 $fullMap = [
                     'no' => ['label' => ['en' => 'NO', 'id' => 'NO'], 'value' => $rowNo],
-                    'name' => ['label' => ['en' => 'NAME OF OFFENDER', 'id' => 'NAME OF OFFENDER'], 'value' => $model->name],
-                    'badge_code' => ['label' => ['en' => 'Badge / H.I.D code', 'id' => 'Badge / H.I.D code'], 'value' => $model->badge_code ?? ''],
-                    'id_number' => ['label' => ['en' => 'KTP NO', 'id' => 'KTP NO'], 'value' => $displayKtp],
-                    'offences' => ['label' => ['en' => 'OFFENCES', 'id' => 'OFFENCES'], 'value' => $model->offences ?? $model->blacklist_reason ?? ''],
-                    'date' => ['label' => ['en' => 'DATE', 'id' => 'DATE'], 'value' => $model->blacklisted_at ? $model->blacklisted_at->format('Y-m-d') : ($model->created_at ? $model->created_at->format('Y-m-d') : '')],
-                    'remark' => ['label' => ['en' => 'REMARK', 'id' => 'REMARK'], 'value' => $model->remark ?? ''],
-                    'company' => ['label' => ['en' => 'COMPANY NAME', 'id' => 'COMPANY NAME'], 'value' => $model->company ?? ''],
-                    'created_at' => ['label' => ['en' => 'Created At', 'id' => 'Dibuat Pada'], 'value' => $model->created_at?->format('Y-m-d H:i:s')],
+                    'name' => ['label' => ['en' => 'NAME OF OFFENDER', 'id' => 'NAMA PELANGGAR'], 'value' => $model->name],
+                    'badge_code' => ['label' => ['en' => 'BADGE / H.I.D CODE', 'id' => 'KODE BADGE / H.I.D'], 'value' => $model->badge_code ?? ''],
+                    'id_number' => ['label' => ['en' => 'KTP NO', 'id' => 'NO KTP'], 'value' => $displayKtp],
+                    'offences' => ['label' => ['en' => 'OFFENCES', 'id' => 'PELANGGARAN'], 'value' => $model->offences ?? $model->blacklist_reason ?? ''],
+                    'date' => ['label' => ['en' => 'DATE', 'id' => 'TANGGAL'], 'value' => $dateVal],
+                    'remark' => ['label' => ['en' => 'REMARK', 'id' => 'KETERANGAN'], 'value' => $model->remark ?? ''],
+                    'company' => ['label' => ['en' => 'COMPANY NAME', 'id' => 'NAMA PERUSAHAAN'], 'value' => $model->company ?? ''],
                 ];
                 break;
 

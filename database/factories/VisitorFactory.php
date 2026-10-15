@@ -41,4 +41,22 @@ class VisitorFactory extends Factory
             'vessel_id' => $vessel?->id ?? Location::factory(),
         ]);
     }
+
+    public function configure(): static
+    {
+        return $this->afterCreating(function (Visitor $visitor) {
+            if ($visitor->is_blacklisted && ! $visitor->blacklists()->exists()) {
+                $visitor->blacklists()->create([
+                    'name' => $visitor->name,
+                    'badge_code' => $visitor->badge_code,
+                    'id_number' => $visitor->id_number,
+                    'offences' => $visitor->offences ?: ($visitor->blacklist_reason ?: 'Prior security incident'),
+                    'blacklisted_at' => $visitor->blacklisted_at ?? now()->toDateString(),
+                    'remark' => $visitor->remark,
+                    'company' => $visitor->company,
+                    'is_active' => true,
+                ]);
+            }
+        });
+    }
 }

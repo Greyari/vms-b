@@ -50,6 +50,16 @@ class VisitorProfileResource extends JsonResource
             'seaman_book_expires_at' => $this->seaman_book_expires_at?->format('Y-m-d'),
             'is_blacklisted' => $this->is_blacklisted,
             'blacklist_reason' => $this->blacklist_reason,
+            'blacklists' => $this->whenLoaded('blacklists', fn () => $this->blacklists->map(fn ($b) => [
+                'id' => $b->id,
+                'offences' => $b->offences,
+                'date' => $b->blacklisted_at?->format('Y-m-d'),
+                'blacklisted_at' => $b->blacklisted_at?->format('Y-m-d'),
+                'badge_code' => $b->badge_code,
+                'remark' => $b->remark,
+                'is_active' => $b->is_active,
+                'unblacklisted_at' => $b->unblacklisted_at?->format('Y-m-d H:i:s'),
+            ])),
             'visits' => VisitResource::collection($this->whenLoaded('visits')),
         ];
     }

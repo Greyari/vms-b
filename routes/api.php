@@ -96,6 +96,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // --- Visitors -------------------------------------------------------
     Route::get('/visitors', [VisitorController::class, 'index'])->middleware('permission:view_visitors');
+    Route::get('/visitors/search', [VisitorController::class, 'search'])->middleware('permission:view_visitors');
     Route::get('/visitors/blacklisted', [VisitorController::class, 'blacklisted'])->middleware('permission:view_visitors');
     Route::get('/visitors/{id}', [VisitorController::class, 'show'])->middleware('permission:view_visitors')->whereUuid('id');
     Route::post('/visitors', [VisitorController::class, 'store'])->middleware('permission:create_visitors');
@@ -123,6 +124,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/visitors/blacklisted/import', [VisitorController::class, 'importBlacklist']);
         Route::post('/visitors/blacklisted', [VisitorController::class, 'storeBlacklist']);
         Route::put('/visitors/blacklisted/{id}', [VisitorController::class, 'updateBlacklist'])->whereUuid('id');
+        Route::post('/visitors/blacklisted/{id}/connect', [VisitorController::class, 'connectBlacklist'])->whereUuid('id');
+        Route::post('/visitors/blacklisted/{id}/unblacklist', [VisitorController::class, 'unblacklist'])->whereUuid('id');
         Route::post('/visitors/{id}/blacklist', [VisitorController::class, 'blacklist']);
         Route::post('/visitors/{id}/unblacklist', [VisitorController::class, 'unblacklist']);
     });
