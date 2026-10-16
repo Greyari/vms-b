@@ -125,11 +125,13 @@ it('previews and imports staff with duplicate detection', function () {
         'staff_id' => 'STF-EX-01',
         'name' => 'Updated Staff',
         'department' => 'HR',
+        'gender' => 'male',
     ]);
     $writer->addRow([
         'staff_id' => 'STF-EX-02',
         'name' => 'New Staff',
         'department' => 'Finance',
+        'gender' => 'Perempuan',
     ]);
     $writer->close();
 
@@ -150,7 +152,8 @@ it('previews and imports staff with duplicate detection', function () {
 
         expect(Staff::where('staff_id', 'STF-EX-01')->value('name'))->toBe('Updated Staff');
         expect(Staff::where('staff_id', 'STF-EX-01')->value('department'))->toBe('HR');
-        expect(Staff::where('staff_id', 'STF-EX-02')->exists())->toBeTrue();
+        expect(Staff::where('staff_id', 'STF-EX-01')->value('gender'))->toBe('M');
+        expect(Staff::where('staff_id', 'STF-EX-02')->value('gender'))->toBe('F');
     } finally {
         @unlink($path);
         @unlink($base);

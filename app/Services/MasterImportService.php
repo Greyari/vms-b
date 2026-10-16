@@ -609,6 +609,32 @@ class MasterImportService
     }
 
     /**
+     * Normalize gender strings ('M', 'F', 'male', 'female', 'laki-laki', 'perempuan', '1', '2')
+     * to single-character 'M' or 'F' matching the char(1) database column.
+     */
+    public static function parseGender(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $raw = strtolower(trim((string) $value));
+        if ($raw === '' || in_array($raw, ['-', 'n/a', 'na', 'null'], true)) {
+            return null;
+        }
+
+        if (in_array($raw, ['m', 'male', 'laki-laki', 'laki', 'pria', 'l', '1'], true)) {
+            return 'M';
+        }
+
+        if (in_array($raw, ['f', 'female', 'perempuan', 'wanita', 'p', '2'], true)) {
+            return 'F';
+        }
+
+        return null;
+    }
+
+    /**
      * Parse identity (KTP, Passport, SIM, Badge/Emp Code, or non-KTP fallback).
      *
      * @return array{
@@ -845,10 +871,11 @@ class MasterImportService
                     ];
                 }
 
-                if (! empty($row['gender']) && ! in_array(strtolower((string) $row['gender']), ['male', 'female', 'laki-laki', 'perempuan'])) {
+                $rawStaffGender = isset($row['gender']) ? trim((string) $row['gender']) : '';
+                if ($rawStaffGender !== '' && ! in_array(strtolower($rawStaffGender), ['-', 'n/a', 'na', 'null'], true) && self::parseGender($rawStaffGender) === null) {
                     return [
                         'identifier' => (string) $staffId,
-                        'error' => "Baris #{$rowNum}: Nilai gender '{$row['gender']}' tidak valid (gunakan male / female).",
+                        'error' => "Baris #{$rowNum}: Nilai gender '{$row['gender']}' tidak valid (gunakan M / F atau male / female).",
                         'is_duplicate' => false,
                     ];
                 }
@@ -1025,10 +1052,10 @@ class MasterImportService
                 $normalizedId = IdentityNumber::normalize($idNumber);
 
                 $rawGender = self::extractRowValue($row, ['gender', 'jenis_kelamin']);
-                if (! empty($rawGender) && ! in_array(strtolower($rawGender), ['male', 'female', 'laki-laki', 'perempuan'], true)) {
+                if ($rawGender !== '' && ! in_array(strtolower($rawGender), ['-', 'n/a', 'na', 'null'], true) && self::parseGender($rawGender) === null) {
                     return [
                         'identifier' => "{$idType}: {$normalizedId}",
-                        'error' => "Baris #{$rowNum}: Nilai gender '{$rawGender}' tidak valid (gunakan male / female).",
+                        'error' => "Baris #{$rowNum}: Nilai gender '{$rawGender}' tidak valid (gunakan M / F atau male / female).",
                         'is_duplicate' => false,
                     ];
                 }
@@ -1163,8 +1190,8 @@ class MasterImportService
             case self::TYPE_STAFF:
                 $staffId = (string) $row['staff_id'];
                 $name = (string) $row['name'];
-                $gender = ! empty($row['gender']) ? (in_array(strtolower((string) $row['gender']), ['female', 'perempuan']) ? 'female' : 'male') : null;
-                $birthDate = ! empty($row['birth_date']) ? Carbon::parse($row['birth_date'])->format('Y-m-d') : null;
+                $gender = self::parseGender($row['gender'] ?? null);
+                $birthDate = self::parseDate($row['birth_date'] ?? null);
 
                 $data = [
                     'staff_id' => $staffId,
@@ -1384,13 +1411,7 @@ class MasterImportService
                 $nationality = self::extractRowValue($row, ['nationality', 'kewarganegaraan'], 'Indonesia');
                 $address = self::extractRowValue($row, ['address', 'alamat', 'alamat_domisili']);
 
-                $rawGender = strtolower(self::extractRowValue($row, ['gender', 'jenis_kelamin']));
-                $gender = null;
-                if (in_array($rawGender, ['female', 'perempuan', 'wanita'], true)) {
-                    $gender = 'female';
-                } elseif (in_array($rawGender, ['male', 'laki-laki', 'pria'], true)) {
-                    $gender = 'male';
-                }
+                $gender = self::parseGender(self::extractRowValue($row, ['gender', 'jenis_kelamin']));
 
                 $rawVisitorType = strtolower(self::extractRowValue($row, ['visitor_type', 'tipe_pengunjung'], 'visitor'));
                 if ($rawVisitorType === 'regular') {
