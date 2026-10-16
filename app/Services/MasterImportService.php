@@ -76,21 +76,15 @@ class MasterImportService
                     $writer->addRow([
                         'staff_id' => 'STF-001',
                         'name' => 'Budi Santoso',
-                        'department' => 'Operasional',
                         'company' => 'PT VMS Indonesia',
-                        'occupation' => 'Staff Lapangan',
                         'gender' => 'male',
-                        'birth_date' => '1990-05-20',
                         'address' => 'Jl. Pelabuhan No. 12',
                     ]);
                     $writer->addRow([
                         'staff_id' => 'STF-002',
                         'name' => 'Siti Rahmawati',
-                        'department' => 'HSE',
                         'company' => 'PT VMS Indonesia',
-                        'occupation' => 'Safety Officer',
                         'gender' => 'female',
-                        'birth_date' => '1993-08-14',
                         'address' => 'Jl. Yos Sudarso No. 45',
                     ]);
                 }, 'template_staff.xlsx');
