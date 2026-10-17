@@ -128,3 +128,31 @@ it('lets security list cards but not export them', function () {
     $this->getJson('/api/cards')->assertOk();
     $this->getJson('/api/cards/export')->assertStatus(403);
 });
+
+it('creates and updates cards with id_card_no, name, date_issued, lost and damaged status', function () {
+    actingAsAdmin();
+
+    $res = $this->postJson('/api/cards', [
+        'card_no' => 'ASL-9999',
+        'id_card_no' => '0001234567',
+        'name' => 'VISITOR GREEN',
+        'date_issued' => '2023-07-22',
+        'status' => 'lost',
+    ])->assertCreated()
+        ->assertJsonPath('card_no', 'ASL-9999')
+        ->assertJsonPath('id_card_no', '0001234567')
+        ->assertJsonPath('name', 'VISITOR GREEN')
+        ->assertJsonPath('status', 'lost');
+
+    $id = $res->json('id');
+
+    $this->putJson("/api/cards/{$id}", [
+        'card_no' => 'ASL-9999',
+        'status' => 'damaged',
+    ])->assertOk()
+        ->assertJsonPath('status', 'damaged');
+
+    $this->getJson('/api/cards?status=damaged')
+        ->assertOk()
+        ->assertJsonPath('data.0.card_no', 'ASL-9999');
+});

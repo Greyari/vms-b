@@ -46,14 +46,18 @@ class MasterImportService
                 return response()->streamDownload(function () {
                     $writer = SimpleExcelWriter::streamDownload('template_cards.xlsx');
                     $writer->addRow([
-                        'card_no' => 'VC-001',
-                        'card_type' => 'visitor',
-                        'note' => 'Kartu Tamu Reguler',
+                        'card_no' => 'ASL-2301',
+                        'id_card_no' => '0005890502',
+                        'name' => 'VISITOR GREEN',
+                        'date_issued' => '2023-07-22',
+                        'status' => 'available',
                     ]);
                     $writer->addRow([
-                        'card_no' => 'VC-002',
-                        'card_type' => 'vip',
-                        'note' => 'Kartu VIP Khusus',
+                        'card_no' => 'ASL-2302-A',
+                        'id_card_no' => '0002112144',
+                        'name' => 'VISITOR GREEN',
+                        'date_issued' => '2025-11-11',
+                        'status' => 'available',
                     ]);
                 }, 'template_cards.xlsx');
 
@@ -806,7 +810,7 @@ class MasterImportService
     {
         switch ($type) {
             case self::TYPE_CARD:
-                $cardNo = $row['card_no'] ?? null;
+                $cardNo = self::extractRowValue($row, ['card_no', 'nomor_kartu', 'card']);
                 if (empty($cardNo)) {
                     return [
                         'identifier' => '-',
@@ -824,6 +828,9 @@ class MasterImportService
                     'existing_data' => $existing ? [
                         'id' => $existing->id,
                         'card_no' => $existing->card_no,
+                        'id_card_no' => $existing->id_card_no ?? $existing->absenteeism_no,
+                        'name' => $existing->name,
+                        'date_issued' => $existing->date_issued?->format('Y-m-d'),
                         'card_type' => $existing->card_type instanceof CardType ? $existing->card_type->value : $existing->card_type,
                         'status' => $existing->status,
                         'note' => $existing->note,
@@ -1111,19 +1118,53 @@ class MasterImportService
 
         switch ($type) {
             case self::TYPE_CARD:
-                $cardNo = (string) $row['card_no'];
-                $cardType = ! empty($row['card_type']) ? strtolower((string) $row['card_type']) : 'visitor';
-                if (! in_array($cardType, array_map(fn ($c) => $c->value, CardType::cases()))) {
+                $cardNo = (string) (self::extractRowValue($row, ['card_no', 'nomor_kartu']) ?: ($row['card_no'] ?? ''));
+                $idCardNo = self::extractRowValue($row, ['id_card_no', 'id_card', 'idcardno', 'absenteeism_no']) ?: null;
+                $cardName = self::extractRowValue($row, ['name', 'nama', 'nama_kartu']) ?: null;
+                $dateIssued = self::parseDate(self::extractRowValue($row, ['date_issued', 'date_issued_tk', 'date', 'tanggal']));
+
+                $cardType = ! empty($row['card_type']) ? strtolower((string) $row['card_type']) : null;
+                if (! $cardType && $cardName) {
+                    $lowerName = strtolower($cardName);
+                    if (str_contains($lowerName, 'green')) {
+                        $cardType = 'visitor_green';
+                    } elseif (str_contains($lowerName, 'white')) {
+                        $cardType = 'visitor_white';
+                    } elseif (str_contains($lowerName, 'crew')) {
+                        $cardType = 'crew';
+                    } elseif (str_contains($lowerName, 'temp')) {
+                        $cardType = 'temporary_worker';
+                    } elseif (str_contains($lowerName, 'special')) {
+                        $cardType = 'special';
+                    } else {
+                        $cardType = 'visitor';
+                    }
+                } elseif (! in_array($cardType, array_map(fn ($c) => $c->value, CardType::cases()))) {
                     $cardType = 'visitor';
                 }
+
+                $rawStatus = strtolower(self::extractRowValue($row, ['status']) ?: '');
+                $status = match ($rawStatus) {
+                    'lost', 'hilang' => 'lost',
+                    'damaged', 'rusak' => 'damaged',
+                    default => 'available',
+                };
                 $note = $row['note'] ?? null;
+
+                $data = [
+                    'card_no' => $cardNo,
+                    'id_card_no' => $idCardNo,
+                    'absenteeism_no' => $idCardNo,
+                    'name' => $cardName,
+                    'date_issued' => $dateIssued,
+                    'card_type' => $cardType,
+                    'note' => $note,
+                ];
 
                 if (! $isDuplicate || ! $model) {
                     VisitorCard::create([
-                        'card_no' => $cardNo,
-                        'card_type' => $cardType,
-                        'status' => 'available',
-                        'note' => $note,
+                        ...$data,
+                        'status' => $status,
                     ]);
 
                     return 'created';
@@ -1133,21 +1174,24 @@ class MasterImportService
                     $model->restore();
                 }
 
-                // Decision: Card status belongs to check-in/check-out; do not touch status of active cards.
                 if ($duplicateAction === 'replace') {
-                    $model->card_type = $cardType;
-                    $model->note = $note;
+                    $model->fill($data);
+                    if ($model->status !== 'in_use' && ! empty($rawStatus)) {
+                        $model->status = $status;
+                    }
                     $model->save();
 
                     return 'replaced';
                 }
 
                 // Update
-                if (! empty($row['card_type'])) {
-                    $model->card_type = $cardType;
+                foreach ($data as $k => $v) {
+                    if ($v !== null && $v !== '') {
+                        $model->{$k} = $v;
+                    }
                 }
-                if (array_key_exists('note', $row)) {
-                    $model->note = $note;
+                if ($model->status !== 'in_use' && ! empty($rawStatus)) {
+                    $model->status = $status;
                 }
                 $model->save();
 

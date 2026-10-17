@@ -18,6 +18,7 @@ class CardController extends Controller
     /** Validation messages the create and the edit form share. */
     private const MESSAGES = [
         'status.prohibited' => 'Card status is set by check-in and check-out, not by hand.',
+        'status.not_in' => 'Card status is set by check-in and check-out, not by hand.',
     ];
 
     public function downloadTemplate(MasterImportService $importService)
@@ -95,7 +96,15 @@ class CardController extends Controller
     {
         $validated = $request->validate($this->cardRules(), self::MESSAGES);
 
-        $card = VisitorCard::create([...$validated, 'status' => 'available']);
+        $status = $validated['status'] ?? 'available';
+        $idCardNo = $validated['id_card_no'] ?? ($validated['absenteeism_no'] ?? null);
+
+        $card = VisitorCard::create([
+            ...$validated,
+            'id_card_no' => $idCardNo,
+            'absenteeism_no' => $idCardNo,
+            'status' => $status,
+        ]);
 
         return response()->json($card->refresh(), 201);
     }
@@ -111,6 +120,16 @@ class CardController extends Controller
     {
         $card = VisitorCard::findOrFail($id);
         $validated = $request->validate($this->cardRules($card), self::MESSAGES);
+
+        if ($card->status === 'in_use' && isset($validated['status']) && $validated['status'] !== 'in_use') {
+            return response()->json([
+                'message' => 'This card is in use by an open visit. Check the visit out first.',
+            ], 422);
+        }
+
+        if (array_key_exists('id_card_no', $validated) && ! array_key_exists('absenteeism_no', $validated)) {
+            $validated['absenteeism_no'] = $validated['id_card_no'];
+        }
 
         $card->update($validated);
 
@@ -149,7 +168,7 @@ class CardController extends Controller
 
     /**
      * Cards matching the master screen's filters: a case-insensitive search
-     * on the card or absenteeism number; a card-number range compared as
+     * on the card, id_card_no, name or absenteeism number; a card-number range compared as
      * lower-cased text, as VMS-old did, in byte order on PostgreSQL so the
      * database's language rules do not reorder dashes and letters; the card
      * type; the active flag; and the status.
@@ -159,7 +178,7 @@ class CardController extends Controller
         $request->validate([
             'card_type' => ['nullable', Rule::enum(CardType::class)],
             'is_active' => ['nullable', Rule::in(['0', '1', 'true', 'false'])],
-            'status' => ['nullable', Rule::in(['available', 'in_use'])],
+            'status' => ['nullable', Rule::in(['available', 'in_use', 'lost', 'damaged'])],
         ]);
 
         $query = VisitorCard::query();
@@ -168,15 +187,21 @@ class CardController extends Controller
         if ($search !== '') {
             $term = '%'.strtolower(addcslashes($search, '%_\\')).'%';
             $query->where(fn (Builder $q) => $q->whereRaw('LOWER(card_no) LIKE ?', [$term])
-                ->orWhereRaw('LOWER(absenteeism_no) LIKE ?', [$term]));
+                ->orWhereRaw('LOWER(COALESCE(id_card_no, \'\')) LIKE ?', [$term])
+                ->orWhereRaw('LOWER(COALESCE(name, \'\')) LIKE ?', [$term])
+                ->orWhereRaw('LOWER(COALESCE(absenteeism_no, \'\')) LIKE ?', [$term]));
         }
 
         $collate = DB::connection()->getDriverName() === 'pgsql' ? ' COLLATE "C"' : '';
-        foreach (['from' => '>=', 'to' => '<='] as $bound => $operator) {
-            $value = trim((string) $request->input($bound, ''));
-            if ($value !== '') {
-                $query->whereRaw("LOWER(card_no){$collate} {$operator} ?", [strtolower($value)]);
-            }
+
+        $from = $request->input('from') ?? $request->input('card_no_from');
+        if ($from !== null && trim((string) $from) !== '') {
+            $query->whereRaw("LOWER(card_no){$collate} >= ?", [strtolower(trim((string) $from))]);
+        }
+
+        $to = $request->input('to') ?? $request->input('card_no_to');
+        if ($to !== null && trim((string) $to) !== '') {
+            $query->whereRaw("LOWER(card_no){$collate} <= ?", [strtolower(trim((string) $to))]);
         }
 
         if ($request->filled('card_type')) {
@@ -195,8 +220,7 @@ class CardController extends Controller
     }
 
     /**
-     * The fields the card master may set. `status` is not one of them:
-     * check-in and check-out keep it in step with the open visits.
+     * The fields the card master may set.
      *
      * @return array<string, mixed>
      */
@@ -204,11 +228,14 @@ class CardController extends Controller
     {
         return [
             'card_no' => ['required', 'string', 'max:255', Rule::unique('visitor_cards', 'card_no')->ignore($card?->id)],
+            'id_card_no' => ['nullable', 'string', 'max:255'],
+            'name' => ['nullable', 'string', 'max:255'],
+            'date_issued' => ['nullable', 'date'],
             'absenteeism_no' => ['nullable', 'string', 'max:255'],
             'card_type' => ['nullable', Rule::enum(CardType::class)],
             'note' => ['nullable', 'string', 'max:255'],
             'is_active' => ['sometimes', 'boolean'],
-            'status' => ['prohibited'],
+            'status' => ['sometimes', 'nullable', Rule::notIn(['in_use']), Rule::in(['available', 'lost', 'damaged'])],
         ];
     }
 }

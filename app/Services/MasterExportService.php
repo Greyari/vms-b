@@ -359,11 +359,14 @@ class MasterExportService
                 /** @var VisitorCard $model */
                 $fullMap = [
                     'card_no' => ['label' => ['en' => 'Card No', 'id' => 'Nomor Kartu'], 'value' => $model->card_no],
+                    'id_card_no' => ['label' => ['en' => 'ID Card No', 'id' => 'No. ID Kartu'], 'value' => $model->id_card_no ?? $model->absenteeism_no],
+                    'name' => ['label' => ['en' => 'Name', 'id' => 'Nama Kartu'], 'value' => $model->name ?? ($model->card_type instanceof CardType ? $model->card_type->label() : $model->card_type)],
+                    'date_issued' => ['label' => ['en' => 'Date Issued (TK)', 'id' => 'Tanggal Keluar (TK)'], 'value' => $model->date_issued?->format('Y-m-d')],
+                    'status' => ['label' => ['en' => 'Status', 'id' => 'Status'], 'value' => $model->status],
                     'absenteeism_no' => ['label' => ['en' => 'Absenteeism No', 'id' => 'No. Absensi'], 'value' => $model->absenteeism_no],
                     'card_type' => ['label' => ['en' => 'Card Type', 'id' => 'Tipe Kartu'], 'value' => $model->card_type instanceof CardType ? $model->card_type->value : $model->card_type],
                     'note' => ['label' => ['en' => 'Note', 'id' => 'Catatan'], 'value' => $model->note],
                     'is_active' => ['label' => ['en' => 'Active', 'id' => 'Status Aktif'], 'value' => $model->is_active ? ($lang === 'en' ? 'Yes' : 'Ya') : ($lang === 'en' ? 'No' : 'Tidak')],
-                    'status' => ['label' => ['en' => 'Status', 'id' => 'Status'], 'value' => $model->status],
                     'created_at' => ['label' => ['en' => 'Created At', 'id' => 'Dibuat Pada'], 'value' => $model->created_at?->format('Y-m-d H:i:s')],
                     'updated_at' => ['label' => ['en' => 'Updated At', 'id' => 'Diperbarui Pada'], 'value' => $model->updated_at?->format('Y-m-d H:i:s')],
                 ];

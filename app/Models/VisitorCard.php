@@ -13,7 +13,10 @@ class VisitorCard extends Model
 {
     use HasFactory, HasUuidV7, LogsActivity, SoftDeletes;
 
-    protected $fillable = ['card_no', 'status', 'absenteeism_no', 'card_type', 'note', 'is_active'];
+    protected $fillable = [
+        'card_no', 'id_card_no', 'name', 'date_issued',
+        'status', 'absenteeism_no', 'card_type', 'note', 'is_active',
+    ];
 
     protected $attributes = [
         'is_active' => true,
@@ -27,6 +30,7 @@ class VisitorCard extends Model
         return [
             'is_active' => 'boolean',
             'card_type' => CardType::class,
+            'date_issued' => 'date',
         ];
     }
 
