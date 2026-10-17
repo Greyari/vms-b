@@ -16,7 +16,10 @@ class VesselArrivalController extends Controller
     public function index(Request $request): JsonResponse
     {
         $perPage = max(1, min((int) $request->input('per_page', 25), 100));
-        $query = VesselArrival::with('vessel')->withCount('crew');
+        $query = VesselArrival::with('vessel')->withCount([
+            'crew',
+            'crew as checked_in_crew_count' => fn ($q) => $q->where('vessel_arrival_crew.status', 'checked_in'),
+        ]);
 
         if ($request->filled('vessel_name')) {
             $search = trim((string) $request->input('vessel_name'));
@@ -114,10 +117,20 @@ class VesselArrivalController extends Controller
             $location = Location::find($validated['location_id']);
             $validated['vessel_name'] = $validated['vessel_name'] ?? $location?->name;
 
+            if (empty($validated['captain']) && ! empty($location?->captain)) {
+                $validated['captain'] = $location->captain;
+            } elseif (! empty($validated['captain']) && $location) {
+                $location->update(['captain' => $validated['captain']]);
+            }
+
             $arrival = VesselArrival::create($validated);
 
             if (array_key_exists('crew_ids', $validated) && is_array($validated['crew_ids'])) {
                 $arrival->crew()->sync($validated['crew_ids']);
+                if (! empty($validated['crew_ids'])) {
+                    Visitor::whereIn('id', $validated['crew_ids'])
+                        ->update(['vessel_id' => $arrival->location_id]);
+                }
             }
 
             return $arrival;
@@ -141,6 +154,8 @@ class VesselArrivalController extends Controller
         $validated = $request->validated();
 
         DB::transaction(function () use ($arrival, $validated) {
+            $wasInPort = $arrival->sign_out_date === null;
+
             if (array_key_exists('location_id', $validated)) {
                 $arrival->location_id = $validated['location_id'];
                 $arrival->vessel_name = Location::find($validated['location_id'])?->name;
@@ -158,11 +173,122 @@ class VesselArrivalController extends Controller
                 }
             }
 
+            if (! empty($validated['captain']) && $arrival->location_id) {
+                Location::where('id', $arrival->location_id)->update(['captain' => $validated['captain']]);
+            }
+
             if (array_key_exists('crew_ids', $validated)) {
-                $arrival->crew()->sync($validated['crew_ids'] ?? []);
+                $crewIds = $validated['crew_ids'] ?? [];
+                $arrival->crew()->sync($crewIds);
+                if (! empty($crewIds)) {
+                    Visitor::whereIn('id', $crewIds)
+                        ->update(['vessel_id' => $arrival->location_id]);
+                }
             }
 
             $arrival->save();
+
+            // If vessel just signed out, automatically check out any remaining checked_in crew
+            if ($wasInPort && $arrival->sign_out_date !== null) {
+                DB::table('vessel_arrival_crew')
+                    ->where('vessel_arrival_id', $arrival->id)
+                    ->where('status', 'checked_in')
+                    ->update([
+                        'status' => 'checked_out',
+                        'checked_out_at' => now(),
+                        'updated_at' => now(),
+                    ]);
+            }
+        });
+
+        $arrival->load(['vessel', 'crew']);
+
+        return response()->json($arrival);
+    }
+
+    public function checkInCrew(Request $request, string $id): JsonResponse
+    {
+        $arrival = VesselArrival::findOrFail($id);
+
+        $validated = $request->validate([
+            'visitor_id' => ['nullable', 'uuid', 'exists:visitors,id', 'required_without_all:visitor_ids,crew_ids'],
+            'visitor_ids' => ['nullable', 'array', 'min:1', 'required_without_all:visitor_id,crew_ids'],
+            'visitor_ids.*' => ['uuid', 'exists:visitors,id'],
+            'crew_ids' => ['nullable', 'array', 'min:1', 'required_without_all:visitor_id,visitor_ids'],
+            'crew_ids.*' => ['uuid', 'exists:visitors,id'],
+            'notes' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        $ids = ! empty($validated['crew_ids'])
+            ? $validated['crew_ids']
+            : (! empty($validated['visitor_ids']) ? $validated['visitor_ids'] : [$validated['visitor_id']]);
+
+        $blacklistedCrew = Visitor::whereIn('id', $ids)->where('is_blacklisted', true)->first();
+        if ($blacklistedCrew) {
+            return response()->json([
+                'message' => "Kru {$blacklistedCrew->name} berstatus blacklist dan tidak dapat di-check-in.",
+            ], 422);
+        }
+
+        DB::transaction(function () use ($arrival, $ids, $validated) {
+            $now = now();
+            $existingIds = $arrival->crew()->whereIn('visitors.id', $ids)->pluck('visitors.id')->all();
+
+            foreach ($ids as $visitorId) {
+                if (in_array($visitorId, $existingIds, true)) {
+                    $arrival->crew()->updateExistingPivot($visitorId, [
+                        'status' => 'checked_in',
+                        'checked_in_at' => $now,
+                        'checked_out_at' => null,
+                        'notes' => $validated['notes'] ?? null,
+                    ]);
+                } else {
+                    $arrival->crew()->attach($visitorId, [
+                        'status' => 'checked_in',
+                        'checked_in_at' => $now,
+                        'checked_out_at' => null,
+                        'notes' => $validated['notes'] ?? null,
+                    ]);
+                }
+            }
+
+            Visitor::whereIn('id', $ids)->update(['vessel_id' => $arrival->location_id]);
+        });
+
+        $arrival->load(['vessel', 'crew']);
+
+        return response()->json($arrival);
+    }
+
+    public function checkOutCrew(Request $request, string $id): JsonResponse
+    {
+        $arrival = VesselArrival::findOrFail($id);
+
+        $validated = $request->validate([
+            'visitor_id' => ['nullable', 'uuid', 'exists:visitors,id', 'required_without_all:visitor_ids,crew_ids'],
+            'visitor_ids' => ['nullable', 'array', 'min:1', 'required_without_all:visitor_id,crew_ids'],
+            'visitor_ids.*' => ['uuid', 'exists:visitors,id'],
+            'crew_ids' => ['nullable', 'array', 'min:1', 'required_without_all:visitor_id,visitor_ids'],
+            'crew_ids.*' => ['uuid', 'exists:visitors,id'],
+            'notes' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        $ids = ! empty($validated['crew_ids'])
+            ? $validated['crew_ids']
+            : (! empty($validated['visitor_ids']) ? $validated['visitor_ids'] : [$validated['visitor_id']]);
+
+        DB::transaction(function () use ($arrival, $ids, $validated) {
+            $now = now();
+            foreach ($ids as $visitorId) {
+                $pivotData = [
+                    'status' => 'checked_out',
+                    'checked_out_at' => $now,
+                ];
+                if (array_key_exists('notes', $validated) && $validated['notes'] !== null) {
+                    $pivotData['notes'] = $validated['notes'];
+                }
+                $arrival->crew()->updateExistingPivot($visitorId, $pivotData);
+            }
         });
 
         $arrival->load(['vessel', 'crew']);

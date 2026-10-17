@@ -52,6 +52,7 @@ class VesselArrival extends Model
     {
         return $this->belongsToMany(Visitor::class, 'vessel_arrival_crew')
             ->using(VesselArrivalCrew::class)
+            ->withPivot(['id', 'status', 'checked_in_at', 'checked_out_at', 'notes'])
             ->withTimestamps();
     }
 }

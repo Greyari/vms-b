@@ -186,3 +186,59 @@ it('deletes a vessel arrival successfully', function () {
 
     expect(VesselArrival::find($arrival->id))->toBeNull();
 });
+
+it('checks in and checks out crew members on a vessel arrival and auto-checks out remaining crew on vessel sign out', function () {
+    actingAsSupervisor();
+    $vessel = Location::factory()->create([
+        'name' => 'MV. OCEAN STAR',
+        'type' => 'repair_vessel',
+        'code' => '9988776',
+        'captain' => 'CAPT. HENDRA',
+    ]);
+    $crew1 = Visitor::factory()->crew()->create(['name' => 'ABK Satu']);
+    $crew2 = Visitor::factory()->crew()->create(['name' => 'ABK Dua']);
+
+    // Create arrival without explicit captain -> inherits from vessel
+    $createRes = $this->postJson('/api/vessel-arrivals', [
+        'location_id' => $vessel->id,
+        'sign_in_date' => '2026-10-01',
+        'crew_ids' => [$crew1->id],
+    ])->assertCreated();
+
+    $arrivalId = $createRes->json('id');
+    expect($createRes->json('captain'))->toBe('CAPT. HENDRA')
+        ->and($createRes->json('crew.0.pivot.status'))->toBe('checked_in')
+        ->and($createRes->json('crew.0.pivot.checked_in_at'))->not->toBeNull();
+
+    // Crew1 vessel_id should be linked to the vessel
+    expect($crew1->fresh()->vessel_id)->toBe($vessel->id);
+
+    // Check-in second crew member via check-in endpoint
+    $checkInRes = $this->postJson("/api/vessel-arrivals/{$arrivalId}/crew/check-in", [
+        'crew_ids' => [$crew2->id],
+        'notes' => 'Onboard shift pagi',
+    ])->assertOk();
+
+    expect($checkInRes->json('crew'))->toHaveCount(2);
+    expect($crew2->fresh()->vessel_id)->toBe($vessel->id);
+
+    // Check-out crew1 individually
+    $checkOutRes = $this->postJson("/api/vessel-arrivals/{$arrivalId}/crew/check-out", [
+        'crew_ids' => [$crew1->id],
+        'notes' => 'Selesai kontrak',
+    ])->assertOk();
+
+    $crewList = collect($checkOutRes->json('crew'))->keyBy('id');
+    expect($crewList[$crew1->id]['pivot']['status'])->toBe('checked_out')
+        ->and($crewList[$crew1->id]['pivot']['checked_out_at'])->not->toBeNull()
+        ->and($crewList[$crew2->id]['pivot']['status'])->toBe('checked_in');
+
+    // Sign out the vessel -> crew2 should be automatically checked out
+    $signOutRes = $this->putJson("/api/vessel-arrivals/{$arrivalId}", [
+        'sign_out_date' => '2026-10-10',
+    ])->assertOk();
+
+    $crewAfterSignOut = collect($signOutRes->json('crew'))->keyBy('id');
+    expect($crewAfterSignOut[$crew2->id]['pivot']['status'])->toBe('checked_out')
+        ->and($crewAfterSignOut[$crew2->id]['pivot']['checked_out_at'])->not->toBeNull();
+});

@@ -11,6 +11,7 @@ use App\Http\Resources\VisitResource;
 use App\Models\Blacklist;
 use App\Models\Visit;
 use App\Models\Visitor;
+use App\Services\BlacklistService;
 use App\Services\MasterExportService;
 use App\Services\MasterImportService;
 use App\Support\IdentityNumber;
@@ -22,7 +23,6 @@ use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
@@ -227,24 +227,28 @@ class VisitorController extends Controller
         ]);
     }
 
-    public function blacklist(Request $request, $id)
+    public function blacklist(Request $request, $id, BlacklistService $blacklistService)
     {
         $validated = $request->validate([
             'reason' => 'required|string',
         ]);
 
         $visitor = Visitor::findOrFail($id);
-        // is_blacklisted / blacklist_reason are guarded (not $fillable) so a
-        // mass-assigned visitor payload can never flip blacklist state — set
-        // them explicitly here.
-        $visitor->forceFill([
-            'is_blacklisted' => true,
-            'blacklist_reason' => $validated['reason'],
-        ])->save();
+
+        $result = $blacklistService->saveEntry([
+            'visitor_id' => $visitor->id,
+            'name' => $visitor->name,
+            'id_number' => $visitor->id_number,
+            'badge_code' => $visitor->badge_code,
+            'offences' => $validated['reason'],
+            'date' => Carbon::now()->format('Y-m-d'),
+            'remark' => $visitor->remark,
+            'company' => $visitor->company,
+        ], 'replace');
 
         return response()->json([
             'message' => 'Visitor blacklisted successfully',
-            'visitor' => (new VisitorSummaryResource($visitor))->resolve(),
+            'visitor' => (new VisitorSummaryResource($result['visitor']->refresh()))->resolve(),
         ]);
     }
 
@@ -357,35 +361,9 @@ class VisitorController extends Controller
         return response()->json($result);
     }
 
-    public function unblacklist($id)
+    public function unblacklist($id, BlacklistService $blacklistService)
     {
-        $blacklist = Blacklist::find($id);
-        if ($blacklist) {
-            $blacklist->update([
-                'is_active' => false,
-                'unblacklisted_at' => now(),
-            ]);
-            if ($blacklist->visitor_id) {
-                $visitor = Visitor::find($blacklist->visitor_id);
-                $visitor?->forceFill([
-                    'is_blacklisted' => false,
-                    'blacklist_reason' => null,
-                ])->save();
-            }
-
-            return response()->json(['message' => 'Visitor removed from blacklist']);
-        }
-
-        $visitor = Visitor::findOrFail($id);
-        $visitor->forceFill([
-            'is_blacklisted' => false,
-            'blacklist_reason' => null,
-        ])->save();
-
-        Blacklist::where('visitor_id', $visitor->id)->where('is_active', true)->update([
-            'is_active' => false,
-            'unblacklisted_at' => now(),
-        ]);
+        $blacklistService->revoke((string) $id);
 
         return response()->json(['message' => 'Visitor removed from blacklist']);
     }
@@ -519,7 +497,7 @@ class VisitorController extends Controller
         }
     }
 
-    public function storeBlacklist(Request $request): JsonResponse
+    public function storeBlacklist(Request $request, BlacklistService $blacklistService): JsonResponse
     {
         $validated = $request->validate([
             'visitor_id' => 'nullable|uuid|exists:visitors,id',
@@ -536,95 +514,16 @@ class VisitorController extends Controller
             'date.required' => 'Date wajib diisi.',
         ]);
 
-        $name = trim($validated['name']);
-        $rawKtp = ! empty($validated['id_number']) ? trim($validated['id_number']) : '';
-        $badgeCode = ! empty($validated['badge_code']) ? trim($validated['badge_code']) : null;
-        $date = MasterImportService::parseDate($validated['date']) ?? Carbon::now()->format('Y-m-d');
-        $remark = ! empty($validated['remark']) ? trim($validated['remark']) : null;
-        $company = ! empty($validated['company']) ? trim($validated['company']) : null;
-        $offences = trim($validated['offences']);
+        $result = $blacklistService->saveEntry($validated, 'reject');
 
-        $parsedIdentity = MasterImportService::parseIdentity($rawKtp, $badgeCode, $name);
-        $idType = $parsedIdentity['id_type'];
-        $idNumber = $parsedIdentity['id_number'];
-        if ($badgeCode === null && ! empty($parsedIdentity['badge_code'])) {
-            $badgeCode = $parsedIdentity['badge_code'];
-        }
-
-        return DB::transaction(function () use ($validated, $name, $idType, $idNumber, $badgeCode, $offences, $date, $remark, $company, $parsedIdentity) {
-            $visitor = null;
-
-            if (! empty($validated['visitor_id'])) {
-                $visitor = Visitor::find($validated['visitor_id']);
-            }
-
-            if (! $visitor && $parsedIdentity['has_real_id']) {
-                $visitor = Visitor::where('id_number', $idNumber)->first();
-            }
-
-            if (! $visitor && $badgeCode !== null) {
-                $visitor = Visitor::where('badge_code', $badgeCode)->first();
-            }
-
-            if ($visitor) {
-                // If visitor is already blacklisted
-                if ($visitor->is_blacklisted || Blacklist::where('visitor_id', $visitor->id)->where('is_active', true)->exists()) {
-                    throw ValidationException::withMessages([
-                        'id_number' => ['Visitor ini sudah berstatus blacklist aktif.'],
-                    ]);
-                }
-
-                $visitor->forceFill([
-                    'is_blacklisted' => true,
-                    'blacklist_reason' => $offences,
-                    'offences' => $offences,
-                    'badge_code' => $badgeCode ?: $visitor->badge_code,
-                    'blacklisted_at' => $date,
-                    'remark' => $remark ?: $visitor->remark,
-                    'company' => $company ?: $visitor->company,
-                ])->save();
-            } else {
-                $visitor = NumberingRetry::run(function () use ($name, $idType, $idNumber, $badgeCode, $offences, $date, $remark, $company) {
-                    $newVisitor = new Visitor;
-                    $newVisitor->forceFill([
-                        'id_type' => $idType,
-                        'id_number' => $idNumber,
-                        'name' => $name,
-                        'badge_code' => $badgeCode,
-                        'offences' => $offences,
-                        'blacklist_reason' => $offences,
-                        'blacklisted_at' => $date,
-                        'remark' => $remark,
-                        'company' => $company,
-                        'is_blacklisted' => true,
-                    ]);
-                    $newVisitor->save();
-
-                    return $newVisitor;
-                });
-            }
-
-            $blacklist = Blacklist::create([
-                'visitor_id' => $visitor->id,
-                'name' => $visitor->name,
-                'id_number' => $visitor->id_number,
-                'badge_code' => $badgeCode ?: $visitor->badge_code,
-                'offences' => $offences,
-                'blacklisted_at' => $date,
-                'remark' => $remark,
-                'company' => $company ?: $visitor->company,
-                'is_active' => true,
-            ]);
-
-            return response()->json([
-                'message' => 'Data blacklist berhasil disimpan.',
-                'blacklist' => $blacklist,
-                'visitor' => (new VisitorSummaryResource($visitor->refresh()))->resolve(),
-            ], 201);
-        });
+        return response()->json([
+            'message' => 'Data blacklist berhasil disimpan.',
+            'blacklist' => $result['blacklist'],
+            'visitor' => (new VisitorSummaryResource($result['visitor']->refresh()))->resolve(),
+        ], 201);
     }
 
-    public function updateBlacklist(Request $request, $id): JsonResponse
+    public function updateBlacklist(Request $request, $id, BlacklistService $blacklistService): JsonResponse
     {
         $validated = $request->validate([
             'visitor_id' => 'nullable|uuid|exists:visitors,id',
@@ -641,108 +540,29 @@ class VisitorController extends Controller
             'date.required' => 'DATE wajib diisi.',
         ]);
 
-        $name = trim($validated['name']);
-        $rawKtp = ! empty($validated['id_number']) ? trim($validated['id_number']) : '';
-        $badgeCode = ! empty($validated['badge_code']) ? trim($validated['badge_code']) : null;
-        $date = MasterImportService::parseDate($validated['date']) ?? Carbon::now()->format('Y-m-d');
-        $remark = ! empty($validated['remark']) ? trim($validated['remark']) : null;
-        $company = ! empty($validated['company']) ? trim($validated['company']) : null;
-        $offences = trim($validated['offences']);
+        $result = $blacklistService->updateEntry((string) $id, $validated);
+        $visitor = $result['visitor'];
+        $blacklist = $result['blacklist'];
 
-        $parsedIdentity = MasterImportService::parseIdentity($rawKtp, $badgeCode, $name);
-        $idType = $parsedIdentity['id_type'];
-        $idNumber = $parsedIdentity['id_number'];
-        if ($badgeCode === null && ! empty($parsedIdentity['badge_code'])) {
-            $badgeCode = $parsedIdentity['badge_code'];
-        }
-
-        return DB::transaction(function () use ($id, $validated, $name, $idType, $idNumber, $badgeCode, $offences, $date, $remark, $company) {
-            $blacklist = Blacklist::find($id);
-            if (! $blacklist) {
-                $blacklist = Blacklist::where('visitor_id', $id)->latest()->first();
-            }
-
-            $visitorId = $validated['visitor_id'] ?? $blacklist?->visitor_id ?? $id;
-            $visitor = Visitor::find($visitorId);
-
-            if ($visitor) {
-                $visitor->forceFill([
-                    'name' => $name,
-                    'id_type' => $idType,
-                    'id_number' => $idNumber,
-                    'badge_code' => $badgeCode,
-                    'offences' => $offences,
-                    'blacklist_reason' => $offences,
-                    'blacklisted_at' => $date,
-                    'remark' => $remark,
-                    'company' => $company ?: $visitor->company,
-                    'is_blacklisted' => true,
-                ])->save();
-            }
-
-            if ($blacklist) {
-                $blacklist->update([
-                    'visitor_id' => $visitor?->id,
-                    'name' => $name,
-                    'id_number' => $visitor?->id_number ?? $idNumber,
-                    'badge_code' => $badgeCode,
-                    'offences' => $offences,
-                    'blacklisted_at' => $date,
-                    'remark' => $remark,
-                    'company' => $company ?: $visitor?->company,
-                    'is_active' => true,
-                ]);
-            } else {
-                $blacklist = Blacklist::create([
-                    'visitor_id' => $visitor?->id,
-                    'name' => $name,
-                    'id_number' => $visitor?->id_number ?? $idNumber,
-                    'badge_code' => $badgeCode,
-                    'offences' => $offences,
-                    'blacklisted_at' => $date,
-                    'remark' => $remark,
-                    'company' => $company ?: $visitor?->company,
-                    'is_active' => true,
-                ]);
-            }
-
-            return response()->json([
-                'message' => 'Data blacklist berhasil diperbarui.',
-                'blacklist' => $blacklist,
-                'visitor' => $visitor ? (new VisitorSummaryResource($visitor->refresh()))->resolve() : $blacklist,
-            ]);
-        });
+        return response()->json([
+            'message' => 'Data blacklist berhasil diperbarui.',
+            'blacklist' => $blacklist,
+            'visitor' => $visitor ? (new VisitorSummaryResource($visitor->refresh()))->resolve() : $blacklist,
+        ]);
     }
 
-    public function connectBlacklist(Request $request, string $id): JsonResponse
+    public function connectBlacklist(Request $request, string $id, BlacklistService $blacklistService): JsonResponse
     {
         $validated = $request->validate([
             'visitor_id' => 'required|uuid|exists:visitors,id',
         ]);
 
-        $blacklist = Blacklist::findOrFail($id);
-        $visitor = Visitor::findOrFail($validated['visitor_id']);
-
-        $blacklist->update([
-            'visitor_id' => $visitor->id,
-            'name' => $visitor->name,
-            'id_number' => $visitor->id_number,
-            'company' => $visitor->company ?: $blacklist->company,
-        ]);
-
-        $visitor->forceFill([
-            'is_blacklisted' => true,
-            'blacklist_reason' => $blacklist->offences,
-            'offences' => $blacklist->offences,
-            'blacklisted_at' => $blacklist->blacklisted_at,
-            'badge_code' => $blacklist->badge_code ?: $visitor->badge_code,
-            'remark' => $blacklist->remark ?: $visitor->remark,
-        ])->save();
+        $result = $blacklistService->connectVisitor($id, $validated['visitor_id']);
 
         return response()->json([
             'message' => 'Data blacklist berhasil dihubungkan ke data pengunjung.',
-            'blacklist' => $blacklist,
-            'visitor' => (new VisitorSummaryResource($visitor->refresh()))->resolve(),
+            'blacklist' => $result['blacklist'],
+            'visitor' => (new VisitorSummaryResource($result['visitor']->refresh()))->resolve(),
         ]);
     }
 
@@ -798,7 +618,7 @@ class VisitorController extends Controller
                     }
                 },
             ],
-            'duplicate_action' => 'nullable|string|in:update,replace',
+            'duplicate_action' => 'nullable|string|in:update,replace,skip',
         ]);
 
         $duplicateAction = $request->input('duplicate_action', 'update');

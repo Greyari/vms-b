@@ -406,14 +406,15 @@ class MasterExportService
             case 'location':
                 /** @var Location $model */
                 $fullMap = [
-                    'name' => ['label' => ['en' => 'Name', 'id' => 'Nama Lokasi / Kapal'], 'value' => $model->name],
-                    'code' => ['label' => ['en' => 'Code / IMO', 'id' => 'Kode / IMO'], 'value' => $model->code],
-                    'type' => ['label' => ['en' => 'Type', 'id' => 'Tipe'], 'value' => $model->type instanceof LocationType ? $model->type->value : $model->type],
-                    'pic' => ['label' => ['en' => 'PIC', 'id' => 'Penanggung Jawab'], 'value' => $model->pic],
-                    'call_sign' => ['label' => ['en' => 'Call Sign', 'id' => 'Call Sign'], 'value' => $model->call_sign],
-                    'flag' => ['label' => ['en' => 'Flag', 'id' => 'Bendera'], 'value' => $model->flag],
+                    'code' => ['label' => ['en' => 'IMONo / Code', 'id' => 'Kode / IMO'], 'value' => $model->code],
+                    'name' => ['label' => ['en' => 'Description / Name', 'id' => 'Nama Lokasi / Kapal'], 'value' => $model->name],
+                    'call_sign' => ['label' => ['en' => 'CallSign', 'id' => 'Call Sign'], 'value' => $model->call_sign],
+                    'flag' => ['label' => ['en' => 'NationalityFlag', 'id' => 'Bendera'], 'value' => $model->flag],
+                    'vessel_type' => ['label' => ['en' => 'Type (Spec)', 'id' => 'Spesifikasi Tipe'], 'value' => $model->vessel_type ?? ($model->type instanceof LocationType ? $model->type->value : $model->type)],
+                    'type' => ['label' => ['en' => 'Category', 'id' => 'Kategori'], 'value' => $model->type instanceof LocationType ? $model->type->value : $model->type],
+                    'captain' => ['label' => ['en' => 'Captain', 'id' => 'Kapten / Nakhoda'], 'value' => $model->captain],
+                    'pic' => ['label' => ['en' => 'Note / PIC', 'id' => 'Penanggung Jawab (PIC / Note)'], 'value' => $model->pic],
                     'port' => ['label' => ['en' => 'Port', 'id' => 'Pelabuhan Asal'], 'value' => $model->port],
-                    'captain' => ['label' => ['en' => 'Captain', 'id' => 'Kapten'], 'value' => $model->captain],
                     'local_agent_company' => ['label' => ['en' => 'Agent Company', 'id' => 'Perusahaan Agen'], 'value' => $model->local_agent_company],
                     'local_agent_name' => ['label' => ['en' => 'Agent PIC', 'id' => 'PIC Agen'], 'value' => $model->local_agent_name],
                     'local_agent_phone' => ['label' => ['en' => 'Agent Phone', 'id' => 'Telepon Agen'], 'value' => $model->local_agent_phone],

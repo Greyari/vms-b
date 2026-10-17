@@ -99,6 +99,25 @@ class CardController extends Controller
         $status = $validated['status'] ?? 'available';
         $idCardNo = $validated['id_card_no'] ?? ($validated['absenteeism_no'] ?? null);
 
+        $cardType = $validated['card_type'] ?? null;
+        if ((! $cardType || $cardType === 'visitor') && ! empty($validated['name'])) {
+            $lowerName = strtolower($validated['name']);
+            if (str_contains($lowerName, 'green')) {
+                $cardType = 'visitor_green';
+            } elseif (str_contains($lowerName, 'white')) {
+                $cardType = 'visitor_white';
+            } elseif (str_contains($lowerName, 'crew')) {
+                $cardType = 'crew';
+            } elseif (str_contains($lowerName, 'temp')) {
+                $cardType = 'temporary_worker';
+            } elseif (str_contains($lowerName, 'special')) {
+                $cardType = 'special';
+            }
+        }
+        if ($cardType) {
+            $validated['card_type'] = $cardType;
+        }
+
         $card = VisitorCard::create([
             ...$validated,
             'id_card_no' => $idCardNo,
@@ -129,6 +148,21 @@ class CardController extends Controller
 
         if (array_key_exists('id_card_no', $validated) && ! array_key_exists('absenteeism_no', $validated)) {
             $validated['absenteeism_no'] = $validated['id_card_no'];
+        }
+
+        if ((empty($validated['card_type']) || $validated['card_type'] === 'visitor') && ! empty($validated['name'])) {
+            $lowerName = strtolower($validated['name']);
+            if (str_contains($lowerName, 'green')) {
+                $validated['card_type'] = 'visitor_green';
+            } elseif (str_contains($lowerName, 'white')) {
+                $validated['card_type'] = 'visitor_white';
+            } elseif (str_contains($lowerName, 'crew')) {
+                $validated['card_type'] = 'crew';
+            } elseif (str_contains($lowerName, 'temp')) {
+                $validated['card_type'] = 'temporary_worker';
+            } elseif (str_contains($lowerName, 'special')) {
+                $validated['card_type'] = 'special';
+            }
         }
 
         $card->update($validated);

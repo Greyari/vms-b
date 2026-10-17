@@ -97,26 +97,31 @@ class MasterImportService
                 return response()->streamDownload(function () {
                     $writer = SimpleExcelWriter::streamDownload('template_locations_vessels.xlsx');
                     $writer->addRow([
-                        'name' => 'Dermaga Barat 01',
-                        'type' => 'location',
-                        'code' => '',
-                        'pic' => 'Ahmad Dahlan',
-                        'call_sign' => '',
-                        'flag' => '',
-                        'port' => 'Batam',
-                        'captain' => '',
-                        'local_agent_company' => '',
+                        'IMONo' => '9174701',
+                        'Description' => 'MT. BAUHINIA',
+                        'CallSign' => '9V9262',
+                        'NationalityFlag' => 'SINGAPORE',
+                        'Type' => 'OIL PRODUCTS TANKER',
+                        'Captain' => 'CAPT. ZHANG',
+                        'Note' => 'AUDRIE KOSASIH',
                     ]);
                     $writer->addRow([
-                        'name' => 'KM Surya Bahari',
-                        'type' => 'repair_vessel',
-                        'code' => 'IMO9234567',
-                        'pic' => '',
-                        'call_sign' => 'YBD99',
-                        'flag' => 'Indonesia',
-                        'port' => 'Batam',
-                        'captain' => 'Capt. Hendra',
-                        'local_agent_company' => 'PT Pelayaran Nusantara',
+                        'IMONo' => '-',
+                        'Description' => 'AOM HOPPER 11',
+                        'CallSign' => 'AOMHOP11',
+                        'NationalityFlag' => 'Indonesia',
+                        'Type' => 'BARGE',
+                        'Captain' => 'N/A',
+                        'Note' => 'ANDI SETIAWAN',
+                    ]);
+                    $writer->addRow([
+                        'IMONo' => 'MAIN_OFFICE',
+                        'Description' => 'MAIN OFFICE',
+                        'CallSign' => '',
+                        'NationalityFlag' => '',
+                        'Type' => 'LOCATION',
+                        'Captain' => '',
+                        'Note' => 'AHMAD DAHLAN',
                     ]);
                 }, 'template_locations_vessels.xlsx');
 
@@ -203,6 +208,7 @@ class MasterImportService
         $duplicates = [];
         $errors = [];
         $newCount = 0;
+        $seenLocationCodes = [];
 
         $rowIndex = 1; // 1-indexed, line 1 is header, data starts at line 2
         foreach ($rows as $rawRow) {
@@ -210,7 +216,10 @@ class MasterImportService
             $cleanRow = $this->cleanRow($rawRow);
 
             // Validation & duplicate check per type
-            $rowAnalysis = $this->analyzeRow($type, $cleanRow, $rowIndex);
+            $rowAnalysis = $this->analyzeRow($type, $cleanRow, $rowIndex, $seenLocationCodes);
+            if (! empty($rowAnalysis['normalized_row']) && is_array($rowAnalysis['normalized_row'])) {
+                $cleanRow = array_merge($cleanRow, $rowAnalysis['normalized_row']);
+            }
 
             if (! empty($rowAnalysis['error'])) {
                 $errors[] = [
@@ -277,6 +286,7 @@ class MasterImportService
         $created = 0;
         $updated = 0;
         $replaced = 0;
+        $skipped = 0;
         $failed = 0;
         $failedDetails = [];
 
@@ -287,12 +297,14 @@ class MasterImportService
             &$created,
             &$updated,
             &$replaced,
+            &$skipped,
             &$failed,
             &$failedDetails
         ) {
             $created = 0;
             $updated = 0;
             $replaced = 0;
+            $skipped = 0;
             $failed = 0;
             $failedDetails = [];
 
@@ -303,15 +315,17 @@ class MasterImportService
                 &$created,
                 &$updated,
                 &$replaced,
+                &$skipped,
                 &$failed,
                 &$failedDetails
             ) {
                 $rowIndex = 1;
+                $seenLocationCodes = [];
                 foreach ($rows as $rawRow) {
                     $rowIndex++;
                     $cleanRow = $this->cleanRow($rawRow);
 
-                    $analysis = $this->analyzeRow($type, $cleanRow, $rowIndex);
+                    $analysis = $this->analyzeRow($type, $cleanRow, $rowIndex, $seenLocationCodes);
 
                     if (! empty($analysis['error'])) {
                         $failed++;
@@ -339,6 +353,8 @@ class MasterImportService
                             $updated++;
                         } elseif ($result === 'replaced') {
                             $replaced++;
+                        } elseif ($result === 'skipped') {
+                            $skipped++;
                         }
                     } catch (\Throwable $e) {
                         if ($e instanceof UniqueConstraintViolationException) {
@@ -362,7 +378,7 @@ class MasterImportService
         }
 
         $success = $created + $updated + $replaced;
-        $message = "Import selesai. Berhasil: {$success} (Baru: {$created}, Diperbarui: {$updated}, Diganti: {$replaced}), Gagal: {$failed}.";
+        $message = "Import selesai. Berhasil: {$success} (Baru: {$created}, Diperbarui: {$updated}, Diganti: {$replaced}), Dilewati: {$skipped}, Gagal: {$failed}.";
 
         ActivityLogger::logEvent('import_master', [
             'type' => $type,
@@ -371,6 +387,7 @@ class MasterImportService
             'created' => $created,
             'updated' => $updated,
             'replaced' => $replaced,
+            'skipped' => $skipped,
             'failed' => $failed,
         ]);
 
@@ -381,8 +398,9 @@ class MasterImportService
             'created' => $created,
             'updated' => $updated,
             'replaced' => $replaced,
+            'skipped' => $skipped > 0 ? $skipped : $failed,
+            'skipped_duplicates' => $skipped,
             'failed' => $failed,
-            'skipped' => $failed,
             'failed_details' => $failedDetails,
             'errors' => array_map(fn ($d) => $d['reason'], $failedDetails),
         ];
@@ -795,18 +813,171 @@ class MasterImportService
     }
 
     /**
+     * Clean placeholder strings ('-', '-.', '.-', 'N/A', 'NA', 'NONE', 'NULL', etc.) in Location Excel rows.
+     */
+    public static function cleanLocationField(?string $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        $trimmed = trim($value);
+        if ($trimmed === '' || in_array(strtoupper($trimmed), ['-', '-.', '.-', '--', 'N/A', 'NA', 'N.A', 'NONE', 'NONE.', 'NULL', 'NIL'], true)) {
+            return null;
+        }
+
+        return $trimmed;
+    }
+
+    /**
+     * Parse and normalize a Location / Vessel row from either the standard Excel format
+     * (IMONo, Description, CallSign, NationalityFlag, Type, Captain, Note) or legacy template keys.
+     *
+     * @param  array<string, mixed>  $row
+     * @param  array<string, string>  $seenLocationCodes
+     * @return array{
+     *   name: string,
+     *   code: string,
+     *   type: string,
+     *   vessel_type: ?string,
+     *   call_sign: ?string,
+     *   sign: ?string,
+     *   flag: ?string,
+     *   port: ?string,
+     *   captain: ?string,
+     *   pic: ?string,
+     *   local_agent_company: ?string,
+     *   local_agent_name: ?string,
+     *   local_agent_phone: ?string
+     * }
+     */
+    public static function parseLocationRow(array $row, array &$seenLocationCodes = []): array
+    {
+        $rawName = self::extractRowValue($row, ['name', 'description', 'vessel_name', 'location_name', 'nama', 'nama_kapal', 'nama_lokasi', 'deskripsi']);
+        $rawImo = self::extractRowValue($row, ['code', 'imono', 'imo_no', 'imo', 'imo_number', 'kode', 'location_code']);
+        $rawType = self::extractRowValue($row, ['type', 'tipe', 'category', 'kategori']);
+        $rawVesselType = self::extractRowValue($row, ['vessel_type', 'spesifikasi_tipe', 'ship_type', 'tipe_kapal']);
+        $rawCallSign = self::extractRowValue($row, ['call_sign', 'callsign', 'call']);
+        $rawSign = self::extractRowValue($row, ['sign']);
+        $rawFlag = self::extractRowValue($row, ['flag', 'nationalityflag', 'nationality_flag', 'bendera', 'nationality']);
+        $rawPort = self::extractRowValue($row, ['port', 'pelabuhan']);
+        $rawCaptain = self::extractRowValue($row, ['captain', 'kapten', 'nakhoda', 'master']);
+        $rawPic = self::extractRowValue($row, ['pic', 'note', 'notes', 'penanggung_jawab', 'keterangan', 'remark']);
+        $rawAgentCompany = self::extractRowValue($row, ['local_agent_company', 'agent_company']);
+        $rawAgentName = self::extractRowValue($row, ['local_agent_name', 'agent_name']);
+        $rawAgentPhone = self::extractRowValue($row, ['local_agent_phone', 'agent_phone']);
+
+        $name = trim($rawName);
+        $cleanImo = self::cleanLocationField($rawImo);
+        $cleanType = self::cleanLocationField($rawType);
+        $cleanVesselType = self::cleanLocationField($rawVesselType);
+
+        // Classify into LocationType ('location', 'repair_vessel', 'tug_boat', 'barge') and vessel_type
+        $upperName = strtoupper($name);
+        $upperImo = strtoupper((string) $cleanImo);
+        $upperType = strtoupper((string) $cleanType);
+        $lowerType = strtolower((string) $cleanType);
+
+        if (in_array($lowerType, ['location', 'repair_vessel', 'tug_boat', 'barge'], true)) {
+            $locType = $lowerType;
+            // If rawType in Excel was uppercase like 'BARGE', preserve it in vessel_type too
+            $vesselType = $cleanVesselType ?? ($cleanType === $upperType && $upperType !== 'LOCATION' ? $cleanType : null);
+        } elseif (
+            str_contains($upperType, 'SUBCONTRACTOR')
+            || str_starts_with($upperImo, 'PT.')
+            || str_starts_with($upperImo, 'PT_')
+            || str_starts_with($upperName, 'PT.')
+            || str_starts_with($upperName, 'PT ')
+        ) {
+            $locType = LocationType::Location->value;
+            $vesselType = $cleanVesselType ?? $cleanType ?? 'SUBCONTRACTOR';
+        } elseif (
+            $upperType === 'LOCATION'
+            || preg_match('/\b(OFFICE|DOCK|YARD|CANTEEN|DORMITORY|WORKSHOP|STORE|ENVIRO|FACILITY|DIAP|SUPPLY)\b/i', $upperName)
+            || preg_match('/(OFFICE|DOCK|YARD|CANTEEN|DORMITORY|WORKSHOP|STORE|ENVIRO|FACILITY|DIAP|SUPPLY)/i', $upperImo)
+        ) {
+            $locType = LocationType::Location->value;
+            $vesselType = $cleanVesselType ?? $cleanType;
+        } elseif (
+            str_contains($upperType, 'BARGE')
+            || str_contains($upperType, 'TONGKANG')
+            || str_contains($upperType, 'PONTOON')
+            || str_contains($upperType, 'HOPPER')
+            || str_starts_with($upperName, 'BG.')
+            || str_starts_with($upperName, 'BG ')
+            || str_contains($upperName, 'HOPPER')
+            || str_contains($upperImo, 'HOPPER')
+            || str_contains($upperImo, 'HOPER')
+        ) {
+            $locType = LocationType::Barge->value;
+            $vesselType = $cleanVesselType ?? $cleanType ?? 'BARGE';
+        } elseif (
+            (str_contains($upperType, 'TUG') && ! str_contains($upperType, 'SUPPLY'))
+            || str_contains($upperType, 'TOWING')
+            || str_contains($upperType, 'PUSHER')
+            || str_contains($upperType, 'ANCHOR BOAT')
+            || str_starts_with($upperName, 'TB.')
+            || str_starts_with($upperName, 'TB ')
+        ) {
+            $locType = LocationType::TugBoat->value;
+            $vesselType = $cleanVesselType ?? $cleanType ?? 'TUG BOAT';
+        } elseif (preg_match('/^H-\d+/i', $upperImo) || preg_match('/^H-\d+/i', $upperName)) {
+            $locType = LocationType::RepairVessel->value;
+            $vesselType = $cleanVesselType ?? $cleanType ?? 'NEW BUILDING';
+        } else {
+            // If no IMO, no vessel type, and no vessel indicators, keep legacy default 'location' if rawType was empty and cleanImo is null
+            if ($cleanType === null && $cleanImo === null && ! preg_match('/\b(MV|MT|TB|BG|KM|AHTS|BHD|CB|LCT|SV|LPG|LNG)\b/i', $upperName)) {
+                $locType = LocationType::Location->value;
+                $vesselType = $cleanVesselType;
+            } else {
+                $locType = LocationType::RepairVessel->value;
+                $vesselType = $cleanVesselType ?? $cleanType;
+            }
+        }
+
+        $baseCode = $cleanImo !== null ? $cleanImo : ($name !== '' ? Location::codeFromName($name) : '');
+        $upperBase = strtoupper($baseCode);
+
+        if ($baseCode !== '' && isset($seenLocationCodes[$upperBase]) && $seenLocationCodes[$upperBase] !== $upperName) {
+            $code = substr($baseCode.'-'.Location::codeFromName($name), 0, 255);
+        } else {
+            if ($baseCode !== '') {
+                $seenLocationCodes[$upperBase] = $upperName;
+            }
+            $code = $baseCode;
+        }
+
+        return [
+            'name' => $name,
+            'code' => $code,
+            'type' => $locType,
+            'vessel_type' => $vesselType,
+            'call_sign' => self::cleanLocationField($rawCallSign),
+            'sign' => self::cleanLocationField($rawSign),
+            'flag' => self::cleanLocationField($rawFlag),
+            'port' => self::cleanLocationField($rawPort),
+            'captain' => self::cleanLocationField($rawCaptain),
+            'pic' => self::cleanLocationField($rawPic),
+            'local_agent_company' => self::cleanLocationField($rawAgentCompany),
+            'local_agent_name' => self::cleanLocationField($rawAgentName),
+            'local_agent_phone' => self::cleanLocationField($rawAgentPhone),
+        ];
+    }
+
+    /**
      * Analyze a row: check requirements, identify key, find DB match.
      *
      * @param  array<string, mixed>  $row
+     * @param  array<string, string>  $seenLocationCodes
      * @return array{
      *   identifier: string,
      *   error?: string,
      *   is_duplicate: bool,
      *   existing_model?: mixed,
-     *   existing_data?: array<string, mixed>
+     *   existing_data?: array<string, mixed>,
+     *   normalized_row?: array<string, mixed>
      * }
      */
-    private function analyzeRow(string $type, array $row, int $rowNum): array
+    private function analyzeRow(string $type, array $row, int $rowNum, array &$seenLocationCodes = []): array
     {
         switch ($type) {
             case self::TYPE_CARD:
@@ -903,27 +1074,19 @@ class MasterImportService
                 ];
 
             case self::TYPE_LOCATION:
-                $name = $row['name'] ?? null;
-                $locType = strtolower(trim((string) ($row['type'] ?? 'location')));
-                if (empty($name)) {
+                $parsed = self::parseLocationRow($row, $seenLocationCodes);
+                $name = $parsed['name'];
+                $locType = $parsed['type'];
+                $code = $parsed['code'];
+
+                if ($name === '') {
                     return [
                         'identifier' => '-',
-                        'error' => "Baris #{$rowNum}: Kolom 'name' wajib diisi.",
+                        'error' => "Baris #{$rowNum}: Kolom 'Description' / 'name' wajib diisi.",
                         'is_duplicate' => false,
+                        'normalized_row' => $parsed,
                     ];
                 }
-
-                $allowedTypes = array_map(fn ($case) => $case->value, LocationType::cases());
-                if (! in_array($locType, $allowedTypes)) {
-                    return [
-                        'identifier' => (string) $name,
-                        'error' => "Baris #{$rowNum}: Tipe '{$locType}' tidak valid. Pilihan: ".implode(', ', $allowedTypes),
-                        'is_duplicate' => false,
-                    ];
-                }
-
-                // If location, code is derived from name. If vessel, code is IMO/code given or name code.
-                $code = ! empty($row['code']) ? trim((string) $row['code']) : Location::codeFromName((string) $name);
 
                 $existing = Location::withTrashed()->where('code', $code)->first();
                 if (! $existing && $locType === LocationType::Location->value) {
@@ -931,14 +1094,19 @@ class MasterImportService
                 }
 
                 return [
-                    'identifier' => $code ?: (string) $name,
+                    'identifier' => $code ?: $name,
                     'is_duplicate' => $existing !== null,
                     'existing_model' => $existing,
+                    'normalized_row' => $parsed,
                     'existing_data' => $existing ? [
                         'id' => $existing->id,
                         'name' => $existing->name,
                         'type' => $existing->type instanceof LocationType ? $existing->type->value : $existing->type,
+                        'vessel_type' => $existing->vessel_type,
                         'code' => $existing->code,
+                        'call_sign' => $existing->call_sign,
+                        'flag' => $existing->flag,
+                        'captain' => $existing->captain,
                         'pic' => $existing->pic,
                     ] : null,
                 ];
@@ -969,50 +1137,59 @@ class MasterImportService
                     }
                 }
 
-                $parsedIdentity = self::parseIdentity($rawKtp, $rawBadge, $name);
-                $idNumber = $parsedIdentity['id_number'];
-                $badgeCode = $parsedIdentity['badge_code'];
-
                 // Fallback offences if empty
                 if (empty($offences)) {
                     $offences = ! empty($remark) ? $remark : 'Blacklisted by Security / Management';
                 }
 
-                $parsedDate = self::parseDate($rawDate) ?? Carbon::now()->format('Y-m-d');
+                $blacklistService = app(BlacklistService::class);
+                $normalized = $blacklistService->normalizePayload([
+                    'name' => $name,
+                    'id_number' => $rawKtp,
+                    'badge_code' => $rawBadge,
+                    'offences' => $offences,
+                    'date' => $rawDate,
+                    'remark' => $remark,
+                    'company' => $company,
+                ]);
 
-                // Duplicate detection:
-                // Acuan: KTP NO (jika ada identitas real), Badge / H.I.D code (jika ada), atau Nama (jika tanpa KTP & tanpa badge)
-                $existing = null;
-                if ($parsedIdentity['has_real_id']) {
-                    $existing = Visitor::where('id_number', $idNumber)->first();
-                }
-                if (! $existing && ! empty($badgeCode)) {
-                    $existing = Visitor::where('badge_code', $badgeCode)->first();
-                }
-                if (! $existing && ! $parsedIdentity['has_real_id']) {
-                    $existing = Visitor::where('id_number', $idNumber)
-                        ->orWhereRaw('LOWER(name) = ?', [strtolower($name)])
-                        ->first();
+                $parsedIdentity = $normalized['parsed_identity'];
+                $idNumber = $normalized['id_number'];
+                $badgeCode = $normalized['badge_code'];
+
+                // Duplicate detection via shared BlacklistService:
+                // Checks both active Blacklist records and Visitor status by KTP, Badge, or Name fallback
+                $existingVisitor = $blacklistService->findMatchingVisitor(null, $parsedIdentity, $badgeCode, $name, matchByNameWhenNoKtp: true);
+                $activeBlacklist = $blacklistService->findActiveBlacklist($existingVisitor, $parsedIdentity, $badgeCode, $name, matchByNameWhenNoKtp: true);
+                if ($activeBlacklist && ! $existingVisitor && $activeBlacklist->visitor_id) {
+                    $existingVisitor = Visitor::find($activeBlacklist->visitor_id);
                 }
 
-                $isDuplicate = $existing !== null && $existing->is_blacklisted;
+                $isDuplicate = ($existingVisitor !== null && $existingVisitor->is_blacklisted) || $activeBlacklist !== null;
+                $existingModel = $existingVisitor ?? $activeBlacklist;
 
                 $displayId = $parsedIdentity['has_real_id'] ? $idNumber : (! empty($badgeCode) ? $badgeCode : 'Tanpa KTP');
                 $identifier = $displayId.(! empty($badgeCode) && $parsedIdentity['has_real_id'] ? " ({$badgeCode})" : '');
 
+                $existingIdNumber = $activeBlacklist?->id_number ?? $existingVisitor?->id_number;
+                $existingDate = $activeBlacklist?->blacklisted_at?->format('Y-m-d')
+                    ?? $existingVisitor?->blacklisted_at?->format('Y-m-d')
+                    ?? $activeBlacklist?->created_at?->format('Y-m-d')
+                    ?? $existingVisitor?->created_at?->format('Y-m-d');
+
                 return [
                     'identifier' => $identifier,
                     'is_duplicate' => $isDuplicate,
-                    'existing_model' => $existing,
-                    'existing_data' => $existing ? [
-                        'id' => $existing->id,
-                        'name' => $existing->name,
-                        'id_number' => (! str_starts_with((string) $existing->id_number, 'NOKTP')) ? $existing->id_number : '-',
-                        'badge_code' => $existing->badge_code,
-                        'offences' => $existing->offences ?? $existing->blacklist_reason,
-                        'date' => $existing->blacklisted_at?->format('Y-m-d') ?? $existing->created_at?->format('Y-m-d'),
-                        'company' => $existing->company,
-                        'remark' => $existing->remark,
+                    'existing_model' => $existingModel,
+                    'existing_data' => $existingModel ? [
+                        'id' => $activeBlacklist?->id ?? $existingVisitor?->id,
+                        'name' => $activeBlacklist?->name ?? $existingVisitor?->name,
+                        'id_number' => (! str_starts_with((string) $existingIdNumber, 'NOKTP')) ? $existingIdNumber : '-',
+                        'badge_code' => $activeBlacklist?->badge_code ?? $existingVisitor?->badge_code,
+                        'offences' => $activeBlacklist?->offences ?? $existingVisitor?->offences ?? $existingVisitor?->blacklist_reason,
+                        'date' => $existingDate,
+                        'company' => $activeBlacklist?->company ?? $existingVisitor?->company,
+                        'remark' => $activeBlacklist?->remark ?? $existingVisitor?->remark,
                     ] : null,
                 ];
 
@@ -1276,23 +1453,24 @@ class MasterImportService
                 return 'updated';
 
             case self::TYPE_LOCATION:
-                $name = (string) $row['name'];
-                $locType = strtolower(trim((string) ($row['type'] ?? 'location')));
-                $code = ! empty($row['code']) ? trim((string) $row['code']) : Location::codeFromName($name);
+                $parsed = is_array($analysis['normalized_row'] ?? null)
+                    ? $analysis['normalized_row']
+                    : self::parseLocationRow($row);
 
                 $data = [
-                    'name' => $name,
-                    'type' => $locType,
-                    'code' => $code,
-                    'call_sign' => $row['call_sign'] ?? null,
-                    'sign' => $row['sign'] ?? null,
-                    'flag' => $row['flag'] ?? null,
-                    'port' => $row['port'] ?? null,
-                    'captain' => $row['captain'] ?? null,
-                    'pic' => $row['pic'] ?? null,
-                    'local_agent_company' => $row['local_agent_company'] ?? null,
-                    'local_agent_name' => $row['local_agent_name'] ?? null,
-                    'local_agent_phone' => $row['local_agent_phone'] ?? null,
+                    'name' => $parsed['name'],
+                    'type' => $parsed['type'],
+                    'vessel_type' => $parsed['vessel_type'],
+                    'code' => $parsed['code'],
+                    'call_sign' => $parsed['call_sign'],
+                    'sign' => $parsed['sign'],
+                    'flag' => $parsed['flag'],
+                    'port' => $parsed['port'],
+                    'captain' => $parsed['captain'],
+                    'pic' => $parsed['pic'],
+                    'local_agent_company' => $parsed['local_agent_company'],
+                    'local_agent_name' => $parsed['local_agent_name'],
+                    'local_agent_phone' => $parsed['local_agent_phone'],
                 ];
 
                 if (! $isDuplicate || ! $model) {
@@ -1343,100 +1521,21 @@ class MasterImportService
                     }
                 }
 
-                $parsedIdentity = self::parseIdentity($rawKtp, $rawBadge, $name);
-                $idType = $parsedIdentity['id_type'];
-                $idNumber = $parsedIdentity['id_number'];
-                $badgeCode = ! empty($parsedIdentity['badge_code']) ? $parsedIdentity['badge_code'] : null;
-
-                $parsedDate = self::parseDate($rawDate) ?? Carbon::now()->format('Y-m-d');
-
                 if (empty($offences)) {
                     $offences = ! empty($remark) ? $remark : 'Blacklisted by Security / Management';
                 }
 
-                $data = [
+                $result = app(BlacklistService::class)->saveEntry([
                     'name' => $name,
-                    'id_type' => $idType,
-                    'id_number' => $idNumber,
-                    'badge_code' => $badgeCode,
+                    'id_number' => $rawKtp,
+                    'badge_code' => $rawBadge,
                     'offences' => $offences,
-                    'blacklist_reason' => $offences,
-                    'blacklisted_at' => $parsedDate,
-                    'remark' => $remark !== '' ? $remark : null,
-                    'company' => $company !== '' ? $company : null,
-                    'is_blacklisted' => true,
-                ];
+                    'date' => $rawDate,
+                    'remark' => $remark,
+                    'company' => $company,
+                ], $duplicateAction, matchByNameWhenNoKtp: true);
 
-                // A row without a real document only carries a NOKTP placeholder.
-                // When it matches a visitor that already has an identity, keep that
-                // identity: overwriting it would wipe a real KTP number and could
-                // collide with another row's placeholder on the unique index.
-                $withoutPlaceholder = function (Visitor $target) use ($data, $parsedIdentity): array {
-                    if (! $parsedIdentity['has_real_id'] && ! empty($target->id_number)) {
-                        unset($data['id_type'], $data['id_number']);
-                    }
-
-                    return $data;
-                };
-
-                if (! $isDuplicate || ! $model) {
-                    $existingVisitor = null;
-                    if ($parsedIdentity['has_real_id']) {
-                        $existingVisitor = Visitor::where('id_number', $idNumber)->first();
-                    }
-                    if (! $existingVisitor && $badgeCode !== null) {
-                        $existingVisitor = Visitor::where('badge_code', $badgeCode)->first();
-                    }
-                    if (! $existingVisitor && ! $parsedIdentity['has_real_id']) {
-                        $existingVisitor = Visitor::where('id_number', $idNumber)
-                            ->orWhereRaw('LOWER(name) = ?', [strtolower($name)])
-                            ->first();
-                    }
-
-                    if ($existingVisitor) {
-                        $existingVisitor->forceFill($withoutPlaceholder($existingVisitor))->save();
-
-                        return 'created';
-                    }
-
-                    $newVisitor = new Visitor;
-                    $newVisitor->forceFill($data)->save();
-
-                    return 'created';
-                }
-
-                if ($duplicateAction === 'replace') {
-                    $model->forceFill($withoutPlaceholder($model))->save();
-
-                    return 'replaced';
-                }
-
-                // Update
-                $model->name = $name;
-                if ($parsedIdentity['has_real_id'] || empty($model->id_number)) {
-                    $model->id_type = $idType;
-                    $model->id_number = $idNumber;
-                }
-                if ($badgeCode !== null) {
-                    $model->badge_code = $badgeCode;
-                }
-                if ($offences !== '') {
-                    $model->offences = $offences;
-                    $model->blacklist_reason = $offences;
-                }
-                if ($parsedDate !== null) {
-                    $model->blacklisted_at = $parsedDate;
-                }
-                if ($remark !== '') {
-                    $model->remark = $remark;
-                }
-                if ($company !== '') {
-                    $model->company = $company;
-                }
-                $model->is_blacklisted = true;
-                $model->save();
-
-                return 'updated';
+                return $result['action'];
 
             case self::TYPE_VISITOR:
                 $name = self::extractRowValue($row, ['name', 'nama', 'full_name', 'nama_lengkap']);

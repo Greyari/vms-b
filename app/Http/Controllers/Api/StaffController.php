@@ -150,7 +150,9 @@ class StaffController extends Controller
         if ($search !== '') {
             $term = '%'.strtolower(addcslashes($search, '%_\\')).'%';
             $query->where(fn (Builder $q) => $q->whereRaw('LOWER(name) LIKE ?', [$term])
-                ->orWhereRaw('LOWER(staff_id) LIKE ?', [$term]));
+                ->orWhereRaw('LOWER(staff_id) LIKE ?', [$term])
+                ->orWhereRaw('LOWER(company) LIKE ?', [$term])
+                ->orWhereRaw('LOWER(address) LIKE ?', [$term]));
         }
 
         $company = trim((string) $request->input('company', ''));
@@ -176,7 +178,7 @@ class StaffController extends Controller
         return [
             'name' => 'required|string|max:255',
             'department' => 'nullable|string|max:255',
-            'gender' => ['nullable', Rule::in(['M', 'F'])],
+            'gender' => ['nullable', Rule::in(['M', 'F', 'Male', 'Female', 'male', 'female', 'L', 'P', 'laki-laki', 'perempuan', 'pria', 'wanita'])],
             'birth_date' => 'nullable|date|before_or_equal:today',
             'company' => 'nullable|string|max:255',
             'address' => 'nullable|string|max:255',

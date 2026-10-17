@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Blacklist;
 use App\Models\User;
 use App\Models\Visitor;
 use Database\Seeders\RoleAndPermissionSeeder;
@@ -65,6 +66,16 @@ class BlacklistMasterTest extends TestCase
             'badge_code' => 'HID-9901',
             'is_blacklisted' => true,
         ]);
+
+        $this->assertDatabaseHas('blacklists', [
+            'name' => 'Budi Santoso',
+            'id_number' => '1234567890123456',
+            'badge_code' => 'HID-9901',
+            'offences' => 'Pencurian tembaga',
+            'remark' => 'Dilarang masuk area yard',
+            'company' => 'PT Sumber Rejeki',
+            'is_active' => true,
+        ]);
     }
 
     public function test_can_create_blacklisted_visitor_without_ktp(): void
@@ -89,6 +100,13 @@ class BlacklistMasterTest extends TestCase
             'name' => 'John Unknown KTP',
             'badge_code' => 'BADGE-5501',
             'is_blacklisted' => true,
+        ]);
+
+        $this->assertDatabaseHas('blacklists', [
+            'name' => 'John Unknown KTP',
+            'badge_code' => 'BADGE-5501',
+            'offences' => 'Pelanggaran Disiplin',
+            'is_active' => true,
         ]);
     }
 
@@ -122,6 +140,14 @@ class BlacklistMasterTest extends TestCase
             'name' => 'Johnathan Doe',
             'badge_code' => 'HID-1122',
             'offences' => 'Melanggar SOP Safety',
+        ]);
+
+        $this->assertDatabaseHas('blacklists', [
+            'visitor_id' => $visitor->id,
+            'name' => 'Johnathan Doe',
+            'badge_code' => 'HID-1122',
+            'offences' => 'Melanggar SOP Safety',
+            'is_active' => true,
         ]);
     }
 
@@ -251,6 +277,26 @@ class BlacklistMasterTest extends TestCase
                 'name' => 'New Offender',
                 'is_blacklisted' => true,
             ]);
+
+            // Both records MUST exist in blacklists table and be active
+            $this->assertDatabaseHas('blacklists', [
+                'id_number' => '3201010101010001',
+                'name' => 'Old Offender Updated',
+                'badge_code' => 'HID-100',
+                'offences' => 'Pelanggaran Diperbarui',
+                'remark' => 'Catatan Baru',
+                'company' => 'PT Baru',
+                'is_active' => true,
+            ]);
+            $this->assertDatabaseHas('blacklists', [
+                'id_number' => '3201010101010002',
+                'name' => 'New Offender',
+                'badge_code' => 'HID-200',
+                'offences' => 'Pelanggaran Baru',
+                'remark' => 'Baru',
+                'company' => 'PT Lain',
+                'is_active' => true,
+            ]);
         } finally {
             @unlink($path);
             @unlink($base);
@@ -301,6 +347,16 @@ class BlacklistMasterTest extends TestCase
                 'is_blacklisted' => true,
                 'badge_code' => 'HID-XLS-01',
                 'offences' => 'Melanggar SOP',
+            ]);
+
+            $this->assertDatabaseHas('blacklists', [
+                'id_number' => '3201010101010999',
+                'name' => 'Legacy XLS Offender',
+                'badge_code' => 'HID-XLS-01',
+                'offences' => 'Melanggar SOP',
+                'remark' => 'Catatan XLS',
+                'company' => 'PT XLS Mandiri',
+                'is_active' => true,
             ]);
         } finally {
             @unlink($path);
@@ -386,6 +442,12 @@ class BlacklistMasterTest extends TestCase
                 'id_type' => 'sim',
                 'id_number' => '840416380046',
             ]);
+
+            // All 5 imported rows must also exist in blacklists table and be returned by GET /api/visitors/blacklisted
+            $this->assertEquals(5, Blacklist::where('is_active', true)->count());
+            $listResponse = $this->actingAs($this->admin, 'sanctum')->getJson('/api/visitors/blacklisted');
+            $listResponse->assertOk();
+            $listResponse->assertJsonPath('total', 5);
         } finally {
             @unlink($path);
             @unlink($base);
@@ -439,5 +501,292 @@ class BlacklistMasterTest extends TestCase
             @unlink($path);
             @unlink($base);
         }
+    }
+
+    /**
+     * (a) Import baris valid muncul di halaman Blacklist dengan semua kolom terisi,
+     * (b) Hasil import dan hasil tambah manual identik di database (kolom terisi sama).
+     */
+    public function test_imported_and_manual_blacklist_records_are_identical_and_appear_on_blacklist_page(): void
+    {
+        // 1. Tambah manual
+        $manualResponse = $this->actingAs($this->admin, 'sanctum')->postJson('/api/visitors/blacklisted', [
+            'name' => 'Hendra Gunawan',
+            'badge_code' => 'HID-5001',
+            'id_number' => '2171011122330001',
+            'offences' => 'Merokok di area tangki bahan bakar',
+            'date' => '2026-10-15',
+            'remark' => 'Dilarang masuk selamanya',
+            'company' => 'PT Samudera Teknik',
+        ]);
+        $manualResponse->assertCreated();
+
+        // 2. Import dengan nilai atribut yang setara (KTP berbeda untuk dibandingkan)
+        $base = tempnam(sys_get_temp_dir(), 'vms_parity_');
+        $path = $base.'.xlsx';
+        $writer = SimpleExcelWriter::create($path);
+        $writer->addRow([
+            'NAME OF OFFENDER' => 'Hendra Gunawan',
+            'Badge / H.I.D code' => 'HID-5002',
+            'KTP NO' => '2171011122330002',
+            'OFFENCES' => 'Merokok di area tangki bahan bakar',
+            'DATE' => '2026-10-15',
+            'REMARK' => 'Dilarang masuk selamanya',
+            'COMPANY NAME' => 'PT Samudera Teknik',
+        ]);
+        $writer->close();
+
+        try {
+            $importFile = new UploadedFile($path, 'parity.xlsx', null, null, true);
+            $importResponse = $this->actingAs($this->admin, 'sanctum')->postJson('/api/visitors/blacklisted/import', [
+                'file' => $importFile,
+                'duplicate_action' => 'update',
+            ]);
+            $importResponse->assertOk();
+            $this->assertEquals(1, $importResponse->json('created'));
+
+            $manualBl = Blacklist::where('id_number', '2171011122330001')->firstOrFail();
+            $importBl = Blacklist::where('id_number', '2171011122330002')->firstOrFail();
+
+            $manualVisitor = Visitor::findOrFail($manualBl->visitor_id);
+            $importVisitor = Visitor::findOrFail($importBl->visitor_id);
+
+            // Compare Blacklist columns
+            $this->assertNotNull($manualBl->visitor_id);
+            $this->assertNotNull($importBl->visitor_id);
+            $this->assertSame($manualBl->name, $importBl->name);
+            $this->assertSame($manualBl->offences, $importBl->offences);
+            $this->assertSame($manualBl->blacklisted_at?->format('Y-m-d'), $importBl->blacklisted_at?->format('Y-m-d'));
+            $this->assertSame($manualBl->remark, $importBl->remark);
+            $this->assertSame($manualBl->company, $importBl->company);
+            $this->assertTrue($manualBl->is_active);
+            $this->assertTrue($importBl->is_active);
+            $this->assertNull($manualBl->unblacklisted_at);
+            $this->assertNull($importBl->unblacklisted_at);
+
+            // Compare Visitor columns
+            $this->assertSame($manualVisitor->name, $importVisitor->name);
+            $this->assertSame($manualVisitor->id_type, $importVisitor->id_type);
+            $this->assertSame($manualVisitor->offences, $importVisitor->offences);
+            $this->assertSame($manualVisitor->blacklist_reason, $importVisitor->blacklist_reason);
+            $this->assertSame($manualVisitor->blacklisted_at?->format('Y-m-d'), $importVisitor->blacklisted_at?->format('Y-m-d'));
+            $this->assertSame($manualVisitor->remark, $importVisitor->remark);
+            $this->assertSame($manualVisitor->company, $importVisitor->company);
+            $this->assertTrue($manualVisitor->is_blacklisted);
+            $this->assertTrue($importVisitor->is_blacklisted);
+
+            // Verify both appear on GET /api/visitors/blacklisted with all required table columns
+            $listResponse = $this->actingAs($this->admin, 'sanctum')->getJson('/api/visitors/blacklisted');
+            $listResponse->assertOk();
+            $listResponse->assertJsonCount(2, 'data');
+
+            $importedRowInApi = collect($listResponse->json('data'))->firstWhere('id_number', '2171011122330002');
+            $this->assertNotNull($importedRowInApi);
+            $this->assertSame('Hendra Gunawan', $importedRowInApi['name']);
+            $this->assertSame('HID-5002', $importedRowInApi['badge_code']);
+            $this->assertSame('2171011122330002', $importedRowInApi['id_number']);
+            $this->assertSame('Merokok di area tangki bahan bakar', $importedRowInApi['offences']);
+            $this->assertSame('2026-10-15', $importedRowInApi['date']);
+            $this->assertSame('Dilarang masuk selamanya', $importedRowInApi['remark']);
+            $this->assertSame('PT Samudera Teknik', $importedRowInApi['company']);
+            $this->assertSame($importVisitor->id, $importedRowInApi['visitor_id']);
+        } finally {
+            @unlink($path);
+            @unlink($base);
+        }
+    }
+
+    /**
+     * (c) Status visitor ikut tersinkron saat import mencocokkan KTP visitor yang sudah ada,
+     *     dan (d) cabut blacklist mengembalikan status visitor serta menonaktifkan record di blacklists.
+     */
+    public function test_visitor_sync_on_import_and_unblacklist_restores_visitor_status(): void
+    {
+        // Visitor non-blacklist sudah ada di master visitors
+        $existingVisitor = Visitor::factory()->create([
+            'name' => 'Surya Pratama',
+            'id_type' => 'ktp',
+            'id_number' => '2171098877660005',
+            'company' => 'PT Karya Bahari',
+            'is_blacklisted' => false,
+        ]);
+
+        $base = tempnam(sys_get_temp_dir(), 'vms_sync_');
+        $path = $base.'.xlsx';
+        $writer = SimpleExcelWriter::create($path);
+        $writer->addRow([
+            'NAME OF OFFENDER' => 'Surya Pratama',
+            'Badge / H.I.D code' => 'HID-7705',
+            'KTP NO' => '2171098877660005',
+            'OFFENCES' => 'Membawa keluar peralatan kerja tanpa izin',
+            'DATE' => '2026-10-16',
+            'REMARK' => 'Ditindak oleh Security Gate 1',
+            'COMPANY NAME' => 'PT Karya Bahari',
+        ]);
+        $writer->close();
+
+        try {
+            $importFile = new UploadedFile($path, 'sync.xlsx', null, null, true);
+            $importResponse = $this->actingAs($this->admin, 'sanctum')->postJson('/api/visitors/blacklisted/import', [
+                'file' => $importFile,
+                'duplicate_action' => 'update',
+            ]);
+            $importResponse->assertOk();
+            $this->assertEquals(1, $importResponse->json('created'));
+
+            // Visitor existing ter-update statusnya dan terhubung ke blacklists melalui visitor_id
+            $existingVisitor->refresh();
+            $this->assertTrue($existingVisitor->is_blacklisted);
+            $this->assertSame('Membawa keluar peralatan kerja tanpa izin', $existingVisitor->blacklist_reason);
+
+            $blacklistRow = Blacklist::where('visitor_id', $existingVisitor->id)->where('is_active', true)->first();
+            $this->assertNotNull($blacklistRow);
+            $this->assertSame('HID-7705', $blacklistRow->badge_code);
+
+            // Cabut blacklist lewat ID record blacklist (seperti tombol Cabut di halaman Blacklist)
+            $unblacklistRes = $this->actingAs($this->admin, 'sanctum')
+                ->postJson("/api/visitors/{$blacklistRow->id}/unblacklist");
+            $unblacklistRes->assertOk();
+
+            $existingVisitor->refresh();
+            $blacklistRow->refresh();
+
+            $this->assertFalse($existingVisitor->is_blacklisted);
+            $this->assertNull($existingVisitor->blacklist_reason);
+            $this->assertFalse($blacklistRow->is_active);
+            $this->assertNotNull($blacklistRow->unblacklisted_at);
+
+            // Halaman Blacklist tidak lagi menampilkan record yang sudah dicabut
+            $listResponse = $this->actingAs($this->admin, 'sanctum')->getJson('/api/visitors/blacklisted');
+            $listResponse->assertOk();
+            $listResponse->assertJsonCount(0, 'data');
+        } finally {
+            @unlink($path);
+            @unlink($base);
+        }
+    }
+
+    /**
+     * (e) Import ulang file yang sama tidak membuat duplikat aktif di tabel blacklists.
+     */
+    public function test_reimporting_same_file_does_not_create_duplicate_active_blacklists(): void
+    {
+        $base = tempnam(sys_get_temp_dir(), 'vms_reimport_');
+        $path = $base.'.xlsx';
+        $writer = SimpleExcelWriter::create($path);
+        $writer->addRow([
+            'NAME OF OFFENDER' => 'Anton Wijaya',
+            'Badge / H.I.D code' => 'HID-301',
+            'KTP NO' => '2171055566660001',
+            'OFFENCES' => 'Pelanggaran K3',
+            'DATE' => '2026-10-12',
+            'REMARK' => 'Catatan 1',
+            'COMPANY NAME' => 'PT Satu',
+        ]);
+        $writer->addRow([
+            'NAME OF OFFENDER' => 'Bayu Nugroho',
+            'Badge / H.I.D code' => 'HID-302',
+            'KTP NO' => '',
+            'OFFENCES' => 'Pelanggaran Jam Kerja',
+            'DATE' => '2026-10-12',
+            'REMARK' => 'Catatan 2',
+            'COMPANY NAME' => 'PT Dua',
+        ]);
+        $writer->close();
+
+        try {
+            // Import pertama -> 2 created
+            $res1 = $this->actingAs($this->admin, 'sanctum')->postJson('/api/visitors/blacklisted/import', [
+                'file' => new UploadedFile($path, 'reimport.xlsx', null, null, true),
+                'duplicate_action' => 'update',
+            ]);
+            $res1->assertOk();
+            $this->assertEquals(2, $res1->json('created'));
+            $this->assertEquals(2, Blacklist::where('is_active', true)->count());
+
+            // Import kedua (file sama, duplicate_action = update) -> 2 updated, tetap 2 active blacklists
+            $res2 = $this->actingAs($this->admin, 'sanctum')->postJson('/api/visitors/blacklisted/import', [
+                'file' => new UploadedFile($path, 'reimport.xlsx', null, null, true),
+                'duplicate_action' => 'update',
+            ]);
+            $res2->assertOk();
+            $this->assertEquals(0, $res2->json('created'));
+            $this->assertEquals(2, $res2->json('updated'));
+            $this->assertEquals(2, Blacklist::where('is_active', true)->count());
+
+            // Import ketiga (file sama, duplicate_action = replace) -> 2 replaced, tetap 2 active blacklists
+            $res3 = $this->actingAs($this->admin, 'sanctum')->postJson('/api/visitors/blacklisted/import', [
+                'file' => new UploadedFile($path, 'reimport.xlsx', null, null, true),
+                'duplicate_action' => 'replace',
+            ]);
+            $res3->assertOk();
+            $this->assertEquals(0, $res3->json('created'));
+            $this->assertEquals(2, $res3->json('replaced'));
+            $this->assertEquals(2, Blacklist::where('is_active', true)->count());
+
+            // Import keempat (file sama, duplicate_action = skip) -> 2 skipped, tetap 2 active blacklists
+            $res4 = $this->actingAs($this->admin, 'sanctum')->postJson('/api/visitors/blacklisted/import', [
+                'file' => new UploadedFile($path, 'reimport.xlsx', null, null, true),
+                'duplicate_action' => 'skip',
+            ]);
+            $res4->assertOk();
+            $this->assertEquals(0, $res4->json('created'));
+            $this->assertEquals(2, $res4->json('skipped_duplicates'));
+            $this->assertEquals(2, Blacklist::where('is_active', true)->count());
+        } finally {
+            @unlink($path);
+            @unlink($base);
+        }
+    }
+
+    /**
+     * (f) Migrasi perbaikan untuk visitor hasil import lama (is_blacklisted = true tanpa record di blacklists).
+     */
+    public function test_repair_orphaned_blacklists_command_backfills_legacy_records(): void
+    {
+        // Buat visitor dengan is_blacklisted = true TANPA record di tabel blacklists (simulasi bug import lama)
+        $legacyVisitor = new Visitor;
+        $legacyVisitor->forceFill([
+            'id_type' => 'ktp',
+            'id_number' => '2171077788880009',
+            'name' => 'Legacy Imported Offender',
+            'badge_code' => 'HID-LEGACY-09',
+            'offences' => 'Pelanggaran dari Import Lama',
+            'blacklist_reason' => 'Pelanggaran dari Import Lama',
+            'blacklisted_at' => '2025-05-20',
+            'remark' => 'Eksport Security Lama',
+            'company' => 'PT Legacy Marine',
+            'is_blacklisted' => true,
+        ])->save();
+
+        // Pastikan awalnya belum ada di tabel blacklists dan halaman Blacklist kosong
+        $this->assertEquals(0, Blacklist::where('visitor_id', $legacyVisitor->id)->count());
+        $beforeList = $this->actingAs($this->admin, 'sanctum')->getJson('/api/visitors/blacklisted');
+        $beforeList->assertJsonCount(0, 'data');
+
+        // Jalankan command perbaikan
+        $this->artisan('vms:repair-blacklists')->assertExitCode(0);
+
+        // Sekarang record blacklists aktif terbentuk dan tampil di halaman Blacklist
+        $this->assertDatabaseHas('blacklists', [
+            'visitor_id' => $legacyVisitor->id,
+            'name' => 'Legacy Imported Offender',
+            'id_number' => '2171077788880009',
+            'badge_code' => 'HID-LEGACY-09',
+            'offences' => 'Pelanggaran dari Import Lama',
+            'remark' => 'Eksport Security Lama',
+            'company' => 'PT Legacy Marine',
+            'is_active' => true,
+        ]);
+
+        // Tercatat di Activity Logs
+        $this->assertDatabaseHas('activity_logs', [
+            'action' => 'migrate_orphaned_blacklists',
+        ]);
+
+        $afterList = $this->actingAs($this->admin, 'sanctum')->getJson('/api/visitors/blacklisted');
+        $afterList->assertOk();
+        $afterList->assertJsonCount(1, 'data');
+        $afterList->assertJsonPath('data.0.name', 'Legacy Imported Offender');
     }
 }

@@ -86,7 +86,7 @@ class LocationController extends Controller
             'is_active' => ['nullable', Rule::in(['0', '1', 'true', 'false'])],
         ]);
 
-        $perPage = max(1, min((int) $request->input('per_page', 25), 100));
+        $perPage = max(1, min((int) $request->input('per_page', 25), 2000));
         $query = Location::query();
 
         // Postgres LIKE is case-sensitive: compare lower-cased, wildcards escaped.
@@ -94,7 +94,12 @@ class LocationController extends Controller
         if ($search !== '') {
             $term = '%'.strtolower(addcslashes($search, '%_\\')).'%';
             $query->where(fn (Builder $q) => $q->whereRaw('LOWER(name) LIKE ?', [$term])
-                ->orWhereRaw('LOWER(code) LIKE ?', [$term]));
+                ->orWhereRaw('LOWER(code) LIKE ?', [$term])
+                ->orWhereRaw('LOWER(COALESCE(vessel_type, \'\')) LIKE ?', [$term])
+                ->orWhereRaw('LOWER(COALESCE(call_sign, \'\')) LIKE ?', [$term])
+                ->orWhereRaw('LOWER(COALESCE(flag, \'\')) LIKE ?', [$term])
+                ->orWhereRaw('LOWER(COALESCE(captain, \'\')) LIKE ?', [$term])
+                ->orWhereRaw('LOWER(COALESCE(pic, \'\')) LIKE ?', [$term]));
         }
 
         if ($request->filled('type')) {

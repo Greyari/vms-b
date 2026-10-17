@@ -59,6 +59,9 @@ class VisitResource extends JsonResource
                 'id' => $this->staff->id,
                 'staff_id' => $this->staff->staff_id,
                 'name' => $this->staff->name,
+                'company' => $this->staff->company,
+                'address' => $this->staff->address,
+                'gender' => $this->staff->gender,
             ]),
             'location' => $this->whenLoaded('location', fn (): ?array => $this->location === null ? null : [
                 'id' => $this->location->id,

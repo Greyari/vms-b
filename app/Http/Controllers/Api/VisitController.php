@@ -8,6 +8,7 @@ use App\Enums\VisitorType;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\VisitorSummaryResource;
 use App\Http\Resources\VisitResource;
+use App\Models\Blacklist;
 use App\Models\GlobalBlacklist;
 use App\Models\Location;
 use App\Models\PreRegistration;
@@ -35,8 +36,24 @@ class VisitController extends Controller
 {
     public function checkKtp($ktp)
     {
+        $normalizedKtp = IdentityNumber::normalize($ktp);
         // VMS owns its visitor registry: a visitor is known here or not at all.
-        $visitor = Visitor::where('id_number', IdentityNumber::normalize($ktp))->first();
+        $visitor = Visitor::where('id_number', $normalizedKtp)->first();
+
+        if ($visitor) {
+            $activeBlacklist = Blacklist::where('is_active', true)
+                ->where(function ($q) use ($visitor, $normalizedKtp) {
+                    $q->where('visitor_id', $visitor->id)
+                        ->orWhere('id_number', $normalizedKtp);
+                })
+                ->latest('blacklisted_at')
+                ->first();
+
+            if ($activeBlacklist && ! $visitor->is_blacklisted) {
+                $visitor->is_blacklisted = true;
+                $visitor->blacklist_reason = $activeBlacklist->offences;
+            }
+        }
 
         // Hybrid spec §6.2: the officer sees global entries for this number as soon as it is typed,
         // whatever document type they were listed under (SEC-4); the SPA compares the type.
@@ -220,13 +237,20 @@ class VisitController extends Controller
             ->where('id_number', $validated['id_number'])
             ->first();
 
-        // A freshly firstOrCreate'd visitor (inside the
-        // transaction) can never be blacklisted — is_blacklisted is not fillable
-        // and defaults false — so this pre-check is the only local gate needed.
-        if ($existingVisitor && $existingVisitor->is_blacklisted) {
+        $activeBlacklist = Blacklist::where('is_active', true)
+            ->where(function ($q) use ($existingVisitor, $validated) {
+                $q->where('id_number', $validated['id_number']);
+                if ($existingVisitor) {
+                    $q->orWhere('visitor_id', $existingVisitor->id);
+                }
+            })
+            ->latest('blacklisted_at')
+            ->first();
+
+        if (($existingVisitor && $existingVisitor->is_blacklisted) || $activeBlacklist !== null) {
             return response()->json([
                 'message' => 'This visitor is blacklisted and cannot be registered for a new visit.',
-                'reason' => $existingVisitor->blacklist_reason,
+                'reason' => $activeBlacklist?->offences ?? $existingVisitor?->blacklist_reason ?? $existingVisitor?->offences,
             ], 422);
         }
 

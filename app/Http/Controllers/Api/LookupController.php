@@ -73,13 +73,13 @@ class LookupController extends Controller
         $locations = Location::query()
             ->where('is_active', true)
             ->orderBy('name')
-            ->select(['id', 'name', 'code', 'type', 'is_active'])
+            ->select(['id', 'name', 'code', 'type', 'vessel_type', 'call_sign', 'flag', 'port', 'captain', 'pic', 'is_active'])
             ->get();
 
         $staffs = Staff::query()
             ->where('is_active', true)
             ->orderBy('name')
-            ->select(['id', 'name', 'department', 'is_active'])
+            ->select(['id', 'name', 'staff_id', 'department', 'gender', 'company', 'address', 'occupation', 'is_active'])
             ->get();
 
         $cards = VisitorCard::query()
