@@ -55,4 +55,11 @@ class VesselArrival extends Model
             ->withPivot(['id', 'status', 'checked_in_at', 'checked_out_at', 'notes'])
             ->withTimestamps();
     }
+
+    public function crewLogs()
+    {
+        return $this->hasMany(VesselArrivalCrewLog::class, 'vessel_arrival_id')
+            ->orderBy('logged_at', 'desc')
+            ->orderBy('created_at', 'desc');
+    }
 }

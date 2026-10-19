@@ -1,8 +1,10 @@
 <?php
 
 use App\Models\Location;
+use App\Models\Staff;
 use App\Models\VesselArrival;
 use App\Models\Visitor;
+use App\Models\VisitorCard;
 
 it('creates a vessel arrival and snapshots vessel_name', function () {
     actingAsSupervisor();
@@ -241,4 +243,59 @@ it('checks in and checks out crew members on a vessel arrival and auto-checks ou
     $crewAfterSignOut = collect($signOutRes->json('crew'))->keyBy('id');
     expect($crewAfterSignOut[$crew2->id]['pivot']['status'])->toBe('checked_out')
         ->and($crewAfterSignOut[$crew2->id]['pivot']['checked_out_at'])->not->toBeNull();
+
+    // Verify crew_logs history is recorded and filterable per crew member
+    $allLogs = $this->getJson("/api/vessel-arrivals/{$arrivalId}/crew-logs")->assertOk()->json();
+    expect($allLogs)->toHaveCount(4); // crew1 check_in, crew2 check_in, crew1 check_out, crew2 check_out (signout)
+
+    $crew1Logs = $this->getJson("/api/vessel-arrivals/{$arrivalId}/crew-logs?visitor_id={$crew1->id}")->assertOk()->json();
+    expect($crew1Logs)->toHaveCount(2)
+        ->and(collect($crew1Logs)->pluck('action')->all())->toContain('check_in', 'check_out');
+});
+
+it('automatically assigns and checks in a crew visitor to the vessel arrival and logs it when registering a visit', function () {
+    actingAsSupervisor();
+    $vessel = Location::factory()->create([
+        'name' => 'MV. PACIFIC GLORY',
+        'type' => 'repair_vessel',
+        'code' => '9123456',
+        'captain' => 'CAPT. ROBERT',
+    ]);
+    $staff = Staff::factory()->create();
+    $card = VisitorCard::factory()->create(['status' => 'available']);
+
+    $visitRes = $this->postJson('/api/visits', [
+        'id_type' => 'passport',
+        'id_number' => 'CREW998877',
+        'name' => 'Chief Engineer Anton',
+        'company' => 'Pacific Shipping',
+        'visitor_type' => 'crew',
+        'occupation' => 'Chief Engineer',
+        'location_id' => $vessel->id,
+        'staff_id' => $staff->id,
+        'card_ids' => [$card->id],
+        'purpose' => 'Crew Sign-On',
+    ])->assertCreated();
+
+    $visitId = $visitRes->json('visit.id');
+
+    // Should have automatically created or found an active VesselArrival for MV. PACIFIC GLORY
+    $arrival = VesselArrival::where('location_id', $vessel->id)->whereNull('sign_out_date')->first();
+    expect($arrival)->not->toBeNull()
+        ->and($arrival->vessel_name)->toBe('MV. PACIFIC GLORY')
+        ->and($arrival->captain)->toBe('CAPT. ROBERT');
+
+    // Crew should be attached and checked_in on that vessel arrival
+    $crewMember = $arrival->crew()->first();
+    expect($crewMember)->not->toBeNull()
+        ->and($crewMember->name)->toBe('Chief Engineer Anton')
+        ->and($crewMember->pivot->status)->toBe('checked_in')
+        ->and($crewMember->pivot->checked_in_at)->not->toBeNull();
+
+    // And a crew check_in log with source = visit_checkin and visit_id should exist
+    $logs = $this->getJson("/api/vessel-arrivals/{$arrival->id}/crew-logs")->assertOk()->json();
+    expect($logs)->toHaveCount(1)
+        ->and($logs[0]['action'])->toBe('check_in')
+        ->and($logs[0]['source'])->toBe('visit_checkin')
+        ->and($logs[0]['visit_id'])->toBe($visitId);
 });

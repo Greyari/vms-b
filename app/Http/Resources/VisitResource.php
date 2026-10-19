@@ -54,6 +54,8 @@ class VisitResource extends JsonResource
                 'id_number' => $this->visitor->id_number,
                 'company' => $this->visitor->company,
                 'visitor_type' => $this->visitor->visitor_type,
+                'occupation' => $this->visitor->occupation,
+                'vessel_id' => $this->visitor->vessel_id,
             ]),
             'staff' => $this->whenLoaded('staff', fn (): ?array => $this->staff === null ? null : [
                 'id' => $this->staff->id,
@@ -68,6 +70,12 @@ class VisitResource extends JsonResource
                 'code' => $this->location->code,
                 'name' => $this->location->name,
                 'type' => $this->location->type,
+                'vessel_type' => $this->location->vessel_type,
+                'call_sign' => $this->location->call_sign,
+                'flag' => $this->location->flag,
+                'port' => $this->location->port,
+                'captain' => $this->location->captain,
+                'pic' => $this->location->pic,
             ]),
             'visitor_cards' => $this->whenLoaded('visitorCards', fn (): array => $this->visitorCards
                 ->map(fn ($card): array => ['id' => $card->id, 'card_no' => $card->card_no])

@@ -31,6 +31,8 @@ class VisitorSummaryResource extends JsonResource
             'gender' => $this->gender,
             'company' => $this->company,
             'visitor_type' => $this->visitor_type,
+            'occupation' => $this->occupation,
+            'vessel_id' => $this->vessel_id,
             'is_blacklisted' => $this->is_blacklisted,
             'blacklist_reason' => $this->blacklist_reason,
             'badge_code' => $this->badge_code,

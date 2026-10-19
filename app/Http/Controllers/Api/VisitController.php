@@ -14,6 +14,8 @@ use App\Models\Location;
 use App\Models\PreRegistration;
 use App\Models\Staff;
 use App\Models\VehicleCard;
+use App\Models\VesselArrival;
+use App\Models\VesselArrivalCrewLog;
 use App\Models\Visit;
 use App\Models\Visitor;
 use App\Models\VisitorCard;
@@ -314,7 +316,7 @@ class VisitController extends Controller
         // commit. The unique indexes stay the backstop — a retryable violation
         // gets up to NumberingRetry::MAX_ATTEMPTS attempts.
         try {
-            $visit = NumberingRetry::run(function () use ($request, $validated, $locationName, $hostName, $newVisitorAttributes, $closeOpenVisits, $preRegistration) {
+            $visit = NumberingRetry::run(function () use ($request, $validated, $location, $locationName, $hostName, $newVisitorAttributes, $closeOpenVisits, $preRegistration) {
                 $visitor = Visitor::firstOrCreate(
                     [
                         'id_type' => $validated['id_type'],
@@ -324,8 +326,17 @@ class VisitController extends Controller
                 );
 
                 $visitorCompany = $validated['company'] ?? $visitor->company;
+                $visitorUpdates = [];
                 if (isset($validated['company']) && $validated['company'] !== '' && $validated['company'] !== $visitor->company) {
-                    $visitor->update(['company' => $validated['company']]);
+                    $visitorUpdates['company'] = $validated['company'];
+                }
+                foreach (['visitor_type', 'occupation', 'vessel_id', 'certificate', 'certificate_no', 'seaman_book_no', 'seaman_book_expires_at'] as $crewField) {
+                    if (! empty($validated[$crewField]) && $validated[$crewField] !== $visitor->{$crewField}) {
+                        $visitorUpdates[$crewField] = $validated[$crewField];
+                    }
+                }
+                if (! empty($visitorUpdates)) {
+                    $visitor->update($visitorUpdates);
                 }
 
                 // Every check-in takes the ticket lock before the guards
@@ -425,6 +436,88 @@ class VisitController extends Controller
                     ? PreRegistration::find($preRegistration->id)
                     : PreRegistration::pendingFor($validated['id_number'], $now->toDateString());
                 $linked?->markCheckedIn($visit);
+
+                // If visitor is a Crew (kru kapal), automatically assign & check-in on the vessel's active arrival
+                $visitorTypeVal = $visitor->visitor_type instanceof VisitorType
+                    ? $visitor->visitor_type->value
+                    : (string) $visitor->visitor_type;
+                $isCrew = $visitorTypeVal === VisitorType::Crew->value
+                    || ($validated['visitor_type'] ?? null) === VisitorType::Crew->value
+                    || ($validated['visitor_type'] ?? null) === VisitorType::Crew;
+
+                if ($isCrew) {
+                    $targetVessel = ! empty($validated['vessel_id'])
+                        ? Location::find($validated['vessel_id'])
+                        : (($location && $location->type !== LocationType::Location)
+                            ? $location
+                            : (! empty($visitor->vessel_id) ? Location::find($visitor->vessel_id) : null));
+
+                    if ($targetVessel && $targetVessel->type !== LocationType::Location) {
+                        if ($visitor->vessel_id !== $targetVessel->id) {
+                            $visitor->update(['vessel_id' => $targetVessel->id]);
+                        }
+
+                        $activeArrival = VesselArrival::where('location_id', $targetVessel->id)
+                            ->whereNull('sign_out_date')
+                            ->orderBy('sign_in_date', 'desc')
+                            ->orderBy('created_at', 'desc')
+                            ->first();
+
+                        if (! $activeArrival) {
+                            $activeArrival = VesselArrival::create([
+                                'location_id' => $targetVessel->id,
+                                'vessel_name' => $targetVessel->name,
+                                'sign_in_date' => $now->toDateString(),
+                                'captain' => $targetVessel->captain,
+                            ]);
+                        }
+
+                        $existingCrew = $activeArrival->crew()
+                            ->where('visitors.id', $visitor->id)
+                            ->exists();
+
+                        $noteText = "Otomatis Check-In dari Tambah Kunjungan #{$visit->ticket_number} ({$visit->purpose})";
+
+                        if ($existingCrew) {
+                            $activeArrival->crew()->updateExistingPivot($visitor->id, [
+                                'status' => 'checked_in',
+                                'checked_in_at' => $now,
+                                'checked_out_at' => null,
+                                'notes' => $noteText,
+                            ]);
+                        } else {
+                            $activeArrival->crew()->attach($visitor->id, [
+                                'status' => 'checked_in',
+                                'checked_in_at' => $now,
+                                'checked_out_at' => null,
+                                'notes' => $noteText,
+                            ]);
+                        }
+
+                        $user = $request->user();
+                        VesselArrivalCrewLog::create([
+                            'vessel_arrival_id' => $activeArrival->id,
+                            'visitor_id' => $visitor->id,
+                            'visit_id' => $visit->id,
+                            'action' => 'check_in',
+                            'source' => 'visit_checkin',
+                            'performed_by' => $user?->id,
+                            'performed_by_name' => $user?->name ?? $user?->username,
+                            'notes' => $noteText,
+                            'logged_at' => $now,
+                        ]);
+
+                        ActivityLogger::logEvent('vessel_crew_check_in', [
+                            'vessel_arrival_id' => $activeArrival->id,
+                            'vessel_name' => $activeArrival->vessel_name,
+                            'visitor_id' => $visitor->id,
+                            'visitor_name' => $visitor->name,
+                            'visit_id' => $visit->id,
+                            'ticket_number' => $visit->ticket_number,
+                            'source' => 'visit_checkin',
+                        ]);
+                    }
+                }
 
                 return $visit;
             });

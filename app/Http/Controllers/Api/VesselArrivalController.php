@@ -6,7 +6,9 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\VesselArrivalRequest;
 use App\Models\Location;
 use App\Models\VesselArrival;
+use App\Models\VesselArrivalCrewLog;
 use App\Models\Visitor;
+use App\Services\ActivityLogger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -112,8 +114,9 @@ class VesselArrivalController extends Controller
     public function store(VesselArrivalRequest $request): JsonResponse
     {
         $validated = $request->validated();
+        $user = $request->user();
 
-        $arrival = DB::transaction(function () use ($validated) {
+        $arrival = DB::transaction(function () use ($validated, $user) {
             $location = Location::find($validated['location_id']);
             $validated['vessel_name'] = $validated['vessel_name'] ?? $location?->name;
 
@@ -126,35 +129,72 @@ class VesselArrivalController extends Controller
             $arrival = VesselArrival::create($validated);
 
             if (array_key_exists('crew_ids', $validated) && is_array($validated['crew_ids'])) {
-                $arrival->crew()->sync($validated['crew_ids']);
-                if (! empty($validated['crew_ids'])) {
-                    Visitor::whereIn('id', $validated['crew_ids'])
+                $crewIds = array_values(array_unique($validated['crew_ids']));
+                $arrival->crew()->sync($crewIds);
+                if (! empty($crewIds)) {
+                    Visitor::whereIn('id', $crewIds)
                         ->update(['vessel_id' => $arrival->location_id]);
+
+                    $now = now();
+                    foreach ($crewIds as $crewId) {
+                        VesselArrivalCrewLog::create([
+                            'vessel_arrival_id' => $arrival->id,
+                            'visitor_id' => $crewId,
+                            'action' => 'check_in',
+                            'source' => 'vessel_signon',
+                            'performed_by' => $user?->id,
+                            'performed_by_name' => $user?->name ?? $user?->username,
+                            'notes' => 'Terdaftar saat pembuatan kedatangan kapal',
+                            'logged_at' => $now,
+                        ]);
+                    }
                 }
             }
 
             return $arrival;
         });
 
-        $arrival->load(['vessel', 'crew']);
+        $arrival->load(['vessel', 'crew', 'crewLogs.visitor']);
 
         return response()->json($arrival, 201);
     }
 
     public function show(string $id): JsonResponse
     {
-        $arrival = VesselArrival::with(['vessel', 'crew'])->findOrFail($id);
+        $arrival = VesselArrival::with(['vessel', 'crew', 'crewLogs.visitor'])->findOrFail($id);
 
         return response()->json($arrival);
+    }
+
+    public function crewLogs(Request $request, string $id): JsonResponse
+    {
+        $arrival = VesselArrival::findOrFail($id);
+
+        $query = VesselArrivalCrewLog::with(['visitor', 'visit'])
+            ->where('vessel_arrival_id', $arrival->id)
+            ->orderBy('logged_at', 'desc')
+            ->orderBy('created_at', 'desc');
+
+        if ($request->filled('visitor_id')) {
+            $query->where('visitor_id', $request->query('visitor_id'));
+        }
+
+        if ($request->filled('action') && in_array($request->query('action'), ['check_in', 'check_out'], true)) {
+            $query->where('action', $request->query('action'));
+        }
+
+        return response()->json($query->get());
     }
 
     public function update(VesselArrivalRequest $request, string $id): JsonResponse
     {
         $arrival = VesselArrival::findOrFail($id);
         $validated = $request->validated();
+        $user = $request->user();
 
-        DB::transaction(function () use ($arrival, $validated) {
+        DB::transaction(function () use ($arrival, $validated, $user) {
             $wasInPort = $arrival->sign_out_date === null;
+            $existingCrewIds = $arrival->crew()->pluck('visitors.id')->all();
 
             if (array_key_exists('location_id', $validated)) {
                 $arrival->location_id = $validated['location_id'];
@@ -178,11 +218,26 @@ class VesselArrivalController extends Controller
             }
 
             if (array_key_exists('crew_ids', $validated)) {
-                $crewIds = $validated['crew_ids'] ?? [];
+                $crewIds = array_values(array_unique($validated['crew_ids'] ?? []));
                 $arrival->crew()->sync($crewIds);
                 if (! empty($crewIds)) {
                     Visitor::whereIn('id', $crewIds)
                         ->update(['vessel_id' => $arrival->location_id]);
+                }
+
+                $newCrewIds = array_diff($crewIds, $existingCrewIds);
+                $now = now();
+                foreach ($newCrewIds as $crewId) {
+                    VesselArrivalCrewLog::create([
+                        'vessel_arrival_id' => $arrival->id,
+                        'visitor_id' => $crewId,
+                        'action' => 'check_in',
+                        'source' => 'vessel_signon',
+                        'performed_by' => $user?->id,
+                        'performed_by_name' => $user?->name ?? $user?->username,
+                        'notes' => 'Ditambahkan pada manifest kedatangan kapal',
+                        'logged_at' => $now,
+                    ]);
                 }
             }
 
@@ -190,18 +245,40 @@ class VesselArrivalController extends Controller
 
             // If vessel just signed out, automatically check out any remaining checked_in crew
             if ($wasInPort && $arrival->sign_out_date !== null) {
-                DB::table('vessel_arrival_crew')
+                $now = now();
+                $checkedInVisitorIds = DB::table('vessel_arrival_crew')
                     ->where('vessel_arrival_id', $arrival->id)
                     ->where('status', 'checked_in')
-                    ->update([
-                        'status' => 'checked_out',
-                        'checked_out_at' => now(),
-                        'updated_at' => now(),
-                    ]);
+                    ->pluck('visitor_id')
+                    ->all();
+
+                if (! empty($checkedInVisitorIds)) {
+                    DB::table('vessel_arrival_crew')
+                        ->where('vessel_arrival_id', $arrival->id)
+                        ->where('status', 'checked_in')
+                        ->update([
+                            'status' => 'checked_out',
+                            'checked_out_at' => $now,
+                            'updated_at' => $now,
+                        ]);
+
+                    foreach ($checkedInVisitorIds as $crewId) {
+                        VesselArrivalCrewLog::create([
+                            'vessel_arrival_id' => $arrival->id,
+                            'visitor_id' => $crewId,
+                            'action' => 'check_out',
+                            'source' => 'vessel_signout',
+                            'performed_by' => $user?->id,
+                            'performed_by_name' => $user?->name ?? $user?->username,
+                            'notes' => 'Otomatis Check-Out saat kapal berangkat (Sign-Out)',
+                            'logged_at' => $now,
+                        ]);
+                    }
+                }
             }
         });
 
-        $arrival->load(['vessel', 'crew']);
+        $arrival->load(['vessel', 'crew', 'crewLogs.visitor']);
 
         return response()->json($arrival);
     }
@@ -209,6 +286,7 @@ class VesselArrivalController extends Controller
     public function checkInCrew(Request $request, string $id): JsonResponse
     {
         $arrival = VesselArrival::findOrFail($id);
+        $user = $request->user();
 
         $validated = $request->validate([
             'visitor_id' => ['nullable', 'uuid', 'exists:visitors,id', 'required_without_all:visitor_ids,crew_ids'],
@@ -222,6 +300,7 @@ class VesselArrivalController extends Controller
         $ids = ! empty($validated['crew_ids'])
             ? $validated['crew_ids']
             : (! empty($validated['visitor_ids']) ? $validated['visitor_ids'] : [$validated['visitor_id']]);
+        $ids = array_values(array_unique($ids));
 
         $blacklistedCrew = Visitor::whereIn('id', $ids)->where('is_blacklisted', true)->first();
         if ($blacklistedCrew) {
@@ -230,7 +309,7 @@ class VesselArrivalController extends Controller
             ], 422);
         }
 
-        DB::transaction(function () use ($arrival, $ids, $validated) {
+        DB::transaction(function () use ($arrival, $ids, $validated, $user) {
             $now = now();
             $existingIds = $arrival->crew()->whereIn('visitors.id', $ids)->pluck('visitors.id')->all();
 
@@ -250,12 +329,30 @@ class VesselArrivalController extends Controller
                         'notes' => $validated['notes'] ?? null,
                     ]);
                 }
+
+                VesselArrivalCrewLog::create([
+                    'vessel_arrival_id' => $arrival->id,
+                    'visitor_id' => $visitorId,
+                    'action' => 'check_in',
+                    'source' => 'manual',
+                    'performed_by' => $user?->id,
+                    'performed_by_name' => $user?->name ?? $user?->username,
+                    'notes' => $validated['notes'] ?? 'Check-In kru di kapal',
+                    'logged_at' => $now,
+                ]);
             }
 
             Visitor::whereIn('id', $ids)->update(['vessel_id' => $arrival->location_id]);
         });
 
-        $arrival->load(['vessel', 'crew']);
+        ActivityLogger::logEvent('vessel_crew_check_in', [
+            'vessel_arrival_id' => $arrival->id,
+            'vessel_name' => $arrival->vessel_name,
+            'crew_ids' => $ids,
+            'notes' => $validated['notes'] ?? null,
+        ]);
+
+        $arrival->load(['vessel', 'crew', 'crewLogs.visitor']);
 
         return response()->json($arrival);
     }
@@ -263,6 +360,7 @@ class VesselArrivalController extends Controller
     public function checkOutCrew(Request $request, string $id): JsonResponse
     {
         $arrival = VesselArrival::findOrFail($id);
+        $user = $request->user();
 
         $validated = $request->validate([
             'visitor_id' => ['nullable', 'uuid', 'exists:visitors,id', 'required_without_all:visitor_ids,crew_ids'],
@@ -276,8 +374,9 @@ class VesselArrivalController extends Controller
         $ids = ! empty($validated['crew_ids'])
             ? $validated['crew_ids']
             : (! empty($validated['visitor_ids']) ? $validated['visitor_ids'] : [$validated['visitor_id']]);
+        $ids = array_values(array_unique($ids));
 
-        DB::transaction(function () use ($arrival, $ids, $validated) {
+        DB::transaction(function () use ($arrival, $ids, $validated, $user) {
             $now = now();
             foreach ($ids as $visitorId) {
                 $pivotData = [
@@ -288,10 +387,28 @@ class VesselArrivalController extends Controller
                     $pivotData['notes'] = $validated['notes'];
                 }
                 $arrival->crew()->updateExistingPivot($visitorId, $pivotData);
+
+                VesselArrivalCrewLog::create([
+                    'vessel_arrival_id' => $arrival->id,
+                    'visitor_id' => $visitorId,
+                    'action' => 'check_out',
+                    'source' => 'manual',
+                    'performed_by' => $user?->id,
+                    'performed_by_name' => $user?->name ?? $user?->username,
+                    'notes' => $validated['notes'] ?? 'Check-Out kru dari kapal',
+                    'logged_at' => $now,
+                ]);
             }
         });
 
-        $arrival->load(['vessel', 'crew']);
+        ActivityLogger::logEvent('vessel_crew_check_out', [
+            'vessel_arrival_id' => $arrival->id,
+            'vessel_name' => $arrival->vessel_name,
+            'crew_ids' => $ids,
+            'notes' => $validated['notes'] ?? null,
+        ]);
+
+        $arrival->load(['vessel', 'crew', 'crewLogs.visitor']);
 
         return response()->json($arrival);
     }
