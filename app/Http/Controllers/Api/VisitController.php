@@ -152,8 +152,8 @@ class VisitController extends Controller
         }
 
         if ($request->has('per_page')) {
-            $perPage = (int) $request->query('per_page', 50);
-            $perPage = max(1, min($perPage, 200));
+            $perPage = (int) $request->query('per_page', 100);
+            $perPage = max(1, min($perPage, 1000));
 
             return response()->json(
                 $query->paginate($perPage)->through(fn (Visit $visit): array => (new VisitResource($visit))->resolve())
@@ -167,8 +167,8 @@ class VisitController extends Controller
 
     public function history(Request $request)
     {
-        $perPage = (int) $request->input('per_page', 50);
-        $perPage = max(1, min($perPage, 200));
+        $perPage = (int) $request->input('per_page', 100);
+        $perPage = max(1, min($perPage, 1000));
 
         $query = Visit::with(['visitor', 'staff', 'location', 'visitorCards', 'vehicleCard'])->orderBy('created_at', 'desc');
 
@@ -220,7 +220,7 @@ class VisitController extends Controller
             'seaman_book_no' => ['nullable', 'string', 'max:255'],
             'seaman_book_expires_at' => ['nullable', 'date'],
             'close_open_visits' => 'sometimes|nullable|boolean',
-            'card_ids' => 'required|array|min:1',
+            'card_ids' => 'nullable|array',
             'card_ids.*' => 'bail|uuid|exists:visitor_cards,id',
             'vehicle_card_id' => 'bail|nullable|uuid|exists:vehicle_cards,id',
             'purpose' => 'required|string',
@@ -383,12 +383,16 @@ class VisitController extends Controller
                     }
                 }
 
+                $cardIds = array_values(array_filter($validated['card_ids'] ?? []));
+
                 // Verify visitor cards are available
-                $visitorCards = VisitorCard::whereIn('id', $validated['card_ids'])->get();
-                if ($visitorCards->contains('status', 'in_use')) {
-                    throw new HttpResponseException(
-                        response()->json(['message' => 'One or more selected Visitor Cards are in use'], 422)
-                    );
+                if (! empty($cardIds)) {
+                    $visitorCards = VisitorCard::whereIn('id', $cardIds)->get();
+                    if ($visitorCards->contains('status', 'in_use')) {
+                        throw new HttpResponseException(
+                            response()->json(['message' => 'One or more selected Visitor Cards are in use'], 422)
+                        );
+                    }
                 }
 
                 // Verify vehicle card is available
@@ -422,8 +426,10 @@ class VisitController extends Controller
                 ]);
 
                 // Sync multi-cards
-                $visit->visitorCards()->sync($validated['card_ids']);
-                VisitorCard::whereIn('id', $validated['card_ids'])->update(['status' => 'in_use']);
+                if (! empty($cardIds)) {
+                    $visit->visitorCards()->sync($cardIds);
+                    VisitorCard::whereIn('id', $cardIds)->update(['status' => 'in_use']);
+                }
 
                 if ($vehicleCard) {
                     $vehicleCard->update(['status' => 'in_use']);
@@ -582,7 +588,7 @@ class VisitController extends Controller
             'purpose' => 'sometimes|string|max:255',
             'vehicle_no' => 'sometimes|nullable|string|max:255',
             'visitor_company' => 'sometimes|nullable|string|max:255',
-            'card_ids' => 'sometimes|array|min:1',
+            'card_ids' => 'sometimes|nullable|array',
             'card_ids.*' => 'bail|uuid|exists:visitor_cards,id',
             'vehicle_card_id' => 'sometimes|nullable|uuid|exists:vehicle_cards,id',
         ]);
@@ -631,7 +637,7 @@ class VisitController extends Controller
 
                 // Visitor Cards update
                 if (array_key_exists('card_ids', $validated)) {
-                    $newCardIds = collect($validated['card_ids'])->unique()->values()->all();
+                    $newCardIds = collect($validated['card_ids'] ?? [])->filter()->unique()->values()->all();
                     $currentCardIds = $visit->visitorCards()->pluck('visitor_cards.id')->all();
 
                     $cardsToRelease = array_diff($currentCardIds, $newCardIds);
@@ -706,7 +712,7 @@ class VisitController extends Controller
     public function reprint(Request $request)
     {
         $date = $request->query('date', now()->toDateString());
-        $perPage = (int) $request->input('per_page', 50);
+        $perPage = (int) $request->input('per_page', 100);
         $perPage = max(1, min($perPage, 100));
 
         $query = Visit::with(['visitor', 'staff', 'location', 'visitorCards', 'vehicleCard'])

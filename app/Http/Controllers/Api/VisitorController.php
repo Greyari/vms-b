@@ -72,7 +72,7 @@ class VisitorController extends Controller
      */
     private function paginatedVisitors(Request $request, bool $blacklisted): LengthAwarePaginator
     {
-        $perPage = (int) $request->input('per_page', 15);
+        $perPage = (int) $request->input('per_page', 100);
         $perPage = max(1, min($perPage, 100));
 
         $query = $this->filteredVisitors($request, $blacklisted)->withCount('visits');
@@ -255,7 +255,7 @@ class VisitorController extends Controller
     // Method to get all blacklisted visitors
     public function blacklisted(Request $request)
     {
-        $perPage = (int) $request->input('per_page', 10);
+        $perPage = (int) $request->input('per_page', 100);
         $perPage = max(1, min($perPage, 100));
 
         $query = Blacklist::query()

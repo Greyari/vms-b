@@ -60,7 +60,7 @@ class ActivityLogController extends Controller
             });
         }
 
-        $perPage = min((int) $request->input('per_page', 25), 100) ?: 25;
+        $perPage = max(1, min((int) $request->input('per_page', 100), 1000));
 
         $logs = $query->paginate($perPage)->through(function (ActivityLog $log) {
             return [

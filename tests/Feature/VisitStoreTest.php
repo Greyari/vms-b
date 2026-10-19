@@ -532,3 +532,24 @@ it('automatically checks out open visits and creates new visit in one atomic tra
     $secondVisit = Visit::find($secondVisitId);
     expect($secondVisit->checked_out_at)->toBeNull();
 });
+
+it('records a valid visit when card_ids is omitted or empty (e.g. vehicle card only)', function () {
+    $staff = Staff::factory()->create();
+    $vehicle = VehicleCard::factory()->create();
+    $location = Location::factory()->create();
+
+    $response = $this->postJson('/api/visits', [
+        'id_type' => 'ktp',
+        'id_number' => '3210000000000881',
+        'name' => 'Vehicle Only Guest',
+        'staff_id' => $staff->id,
+        'location_id' => $location->id,
+        'card_ids' => [],
+        'vehicle_card_id' => $vehicle->id,
+        'purpose' => 'Quick Cargo Drop',
+    ]);
+
+    $response->assertStatus(201);
+    expect($response->json('visit.visitor_cards'))->toBeEmpty();
+    expect($vehicle->fresh()->status)->toBe('in_use');
+});

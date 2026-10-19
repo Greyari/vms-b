@@ -77,7 +77,7 @@ class CardController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $perPage = max(1, min((int) $request->input('per_page', 25), 100));
+        $perPage = max(1, min((int) $request->input('per_page', 100), 1000));
 
         return response()->json($this->filteredCards($request)->orderBy('card_no')->paginate($perPage));
     }

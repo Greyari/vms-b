@@ -34,7 +34,7 @@ class ReportController extends Controller
             );
         }
 
-        $perPage = max(1, min((int) $request->input('per_page', 50), 100));
+        $perPage = max(1, min((int) $request->input('per_page', 100), 100));
         $visits = $query->paginate($perPage);
 
         return response()->json(
@@ -231,7 +231,7 @@ class ReportController extends Controller
             return response()->json($query->take(5000)->get());
         }
 
-        $perPage = max(1, min((int) $request->input('per_page', 25), 100));
+        $perPage = max(1, min((int) $request->input('per_page', 100), 100));
 
         return response()->json($query->paginate($perPage));
     }

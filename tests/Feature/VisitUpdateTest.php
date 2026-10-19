@@ -204,3 +204,16 @@ it('requires update_visits permission to call the endpoint', function () {
         'purpose' => 'Hacked Purpose',
     ])->assertStatus(403);
 });
+
+it('allows clearing all visitor cards on an open visit and releases them to available', function () {
+    $oldCard = VisitorCard::factory()->inUse()->create(['card_no' => 'CARD-CLEAR-01']);
+    $visit = createOpenVisit();
+    $visit->visitorCards()->sync([$oldCard->id]);
+
+    $response = $this->putJson("/api/visits/{$visit->id}", [
+        'card_ids' => [],
+    ])->assertStatus(200);
+
+    expect($oldCard->fresh()->status)->toBe('available');
+    expect($response->json('visit.visitor_cards'))->toBeEmpty();
+});

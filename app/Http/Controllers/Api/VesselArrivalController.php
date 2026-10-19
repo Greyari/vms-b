@@ -17,7 +17,7 @@ class VesselArrivalController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $perPage = max(1, min((int) $request->input('per_page', 25), 100));
+        $perPage = max(1, min((int) $request->input('per_page', 100), 1000));
         $query = VesselArrival::with('vessel')->withCount([
             'crew',
             'crew as checked_in_crew_count' => fn ($q) => $q->where('vessel_arrival_crew.status', 'checked_in'),

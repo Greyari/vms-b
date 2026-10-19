@@ -35,9 +35,11 @@ it('returns dashboard stats, card counts and a 7-day chart with correct values',
     $response = $this->getJson('/api/dashboard');
 
     $response->assertOk()->assertJsonStructure([
-        'stats' => ['active_visits', 'month_visits', 'total_visitors', 'blacklisted_visitors'],
+        'stats' => ['active_visits', 'month_visits', 'total_visitors', 'blacklisted_visitors', 'today_visits', 'today_checkouts', 'active_vessels', 'active_crew'],
         'cards' => ['total', 'available', 'in_use'],
         'vehicle_cards' => ['total', 'available', 'in_use'],
+        'vessels' => ['total', 'active_in_yard', 'active_list'],
+        'crew' => ['active_onboard', 'total_registered', 'recent_logs'],
         'chart',
         'recent_visits',
     ]);
@@ -46,6 +48,8 @@ it('returns dashboard stats, card counts and a 7-day chart with correct values',
     expect($response->json('stats.month_visits'))->toBe(3);
     expect($response->json('stats.total_visitors'))->toBe(3);
     expect($response->json('stats.blacklisted_visitors'))->toBe(1);
+    expect($response->json('stats.today_visits'))->toBe(3);
+    expect($response->json('stats.today_checkouts'))->toBe(1);
 
     expect($response->json('cards.total'))->toBe(5);
     expect($response->json('cards.available'))->toBe(3);
@@ -58,6 +62,11 @@ it('returns dashboard stats, card counts and a 7-day chart with correct values',
     expect($response->json('chart'))->toHaveCount(7);
     expect(count($response->json('recent_visits')))->toBeLessThanOrEqual(5);
     expect(count($response->json('recent_visits')))->toBe(2);
+    expect($response->json('recent_visits.0'))->toHaveKeys([
+        'id', 'ticket_number', 'visitor_name', 'visitor_type', 'company',
+        'location_name', 'is_vessel', 'staff_name', 'time_in', 'purpose',
+        'card_no', 'vehicle_no',
+    ]);
 });
 
 it('returns a null-safe dashboard on an empty database (B9)', function () {

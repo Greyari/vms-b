@@ -97,8 +97,8 @@ class VehicleCardController extends Controller
         $query = $this->filteredQuery($request)->orderBy('card_no');
 
         if ($request->has('page') || $request->has('per_page')) {
-            $perPage = (int) $request->input('per_page', 15);
-            $perPage = max(1, min($perPage, 100));
+            $perPage = (int) $request->input('per_page', 100);
+            $perPage = max(1, min($perPage, 1000));
 
             return response()->json($query->paginate($perPage));
         }

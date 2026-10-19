@@ -86,7 +86,7 @@ class LocationController extends Controller
             'is_active' => ['nullable', Rule::in(['0', '1', 'true', 'false'])],
         ]);
 
-        $perPage = max(1, min((int) $request->input('per_page', 25), 2000));
+        $perPage = max(1, min((int) $request->input('per_page', 100), 1000));
         $query = Location::query();
 
         // Postgres LIKE is case-sensitive: compare lower-cased, wildcards escaped.
