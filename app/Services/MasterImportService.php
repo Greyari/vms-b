@@ -203,6 +203,9 @@ class MasterImportService
      */
     public function preview(string $type, UploadedFile $file): array
     {
+        @set_time_limit(0);
+        @ini_set('memory_limit', '512M');
+
         $rows = $this->readRows($file);
         $preview = [];
         $duplicates = [];
@@ -281,6 +284,9 @@ class MasterImportService
      */
     public function import(string $type, UploadedFile $file, string $duplicateAction = 'update'): array
     {
+        @set_time_limit(0);
+        @ini_set('memory_limit', '512M');
+
         $rows = $this->readRows($file);
         $total = count($rows);
         $created = 0;
@@ -413,7 +419,7 @@ class MasterImportService
      */
     private function readRows(UploadedFile $file): array
     {
-        $maxRows = (int) config('vms.import_max_rows', 2000);
+        $maxRows = (int) config('vms.import_max_rows', 0);
         $extension = strtolower($file->getClientOriginalExtension());
 
         if ($extension === 'xls') {
@@ -437,7 +443,7 @@ class MasterImportService
                 }
 
                 $rows[] = $row;
-                if (count($rows) > $maxRows) {
+                if ($maxRows > 0 && count($rows) > $maxRows) {
                     throw ValidationException::withMessages([
                         'file' => ["Import aborted: the file exceeds the maximum of {$maxRows} rows."],
                     ]);
@@ -488,7 +494,7 @@ class MasterImportService
 
             if ($hasData) {
                 $rows[] = $row;
-                if (count($rows) > $maxRows) {
+                if ($maxRows > 0 && count($rows) > $maxRows) {
                     throw ValidationException::withMessages([
                         'file' => ["Import aborted: the file exceeds the maximum of {$maxRows} rows."],
                     ]);

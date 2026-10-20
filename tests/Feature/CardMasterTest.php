@@ -138,11 +138,13 @@ it('creates and updates cards with id_card_no, name, date_issued, lost and damag
         'name' => 'VISITOR GREEN',
         'date_issued' => '2023-07-22',
         'status' => 'lost',
+        'note' => 'Hilang di dermaga 1',
     ])->assertCreated()
         ->assertJsonPath('card_no', 'ASL-9999')
         ->assertJsonPath('id_card_no', '0001234567')
         ->assertJsonPath('name', 'VISITOR GREEN')
-        ->assertJsonPath('status', 'lost');
+        ->assertJsonPath('status', 'lost')
+        ->assertJsonPath('note', 'Hilang di dermaga 1');
 
     $id = $res->json('id');
 

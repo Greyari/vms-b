@@ -12,7 +12,7 @@ class VehicleCard extends Model
 {
     use HasFactory, HasUuidV7, LogsActivity, SoftDeletes;
 
-    protected $fillable = ['card_no', 'status'];
+    protected $fillable = ['card_no', 'status', 'note'];
 
     public function visits()
     {

@@ -120,12 +120,14 @@ class VehicleCardController extends Controller
     {
         $validated = $request->validate([
             'card_no' => 'required|string|max:255|unique:vehicle_cards,card_no',
-            'status' => 'nullable|in:available,in_use',
+            'status' => 'nullable|in:available,in_use,lost,damaged',
+            'note' => 'nullable|string|max:255',
         ]);
 
         $card = VehicleCard::create([
             'card_no' => $validated['card_no'],
             'status' => $validated['status'] ?? 'available',
+            'note' => $validated['note'] ?? null,
         ]);
 
         return response()->json($card, 201);
@@ -143,12 +145,14 @@ class VehicleCardController extends Controller
         $card = VehicleCard::findOrFail($id);
         $validated = $request->validate([
             'card_no' => 'required|string|max:255|unique:vehicle_cards,card_no,'.$card->id,
-            'status' => 'nullable|in:available,in_use',
+            'status' => 'nullable|in:available,in_use,lost,damaged',
+            'note' => 'nullable|string|max:255',
         ]);
 
         $card->update([
             'card_no' => $validated['card_no'],
             'status' => $validated['status'] ?? $card->status,
+            'note' => array_key_exists('note', $validated) ? $validated['note'] : $card->note,
         ]);
 
         return response()->json($card);

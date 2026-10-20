@@ -61,11 +61,13 @@ class VehicleCardMasterTest extends TestCase
 
         $updateRes = $this->actingAs($this->admin)->putJson("/api/vehicle-cards/{$cardId}", [
             'card_no' => 'VH-UPDATED',
-            'status' => 'in_use',
+            'status' => 'lost',
+            'note' => 'Hilang di gerbang timur',
         ]);
         $updateRes->assertStatus(200);
         $this->assertSame('VH-UPDATED', $updateRes->json()['card_no']);
-        $this->assertSame('in_use', $updateRes->json()['status']);
+        $this->assertSame('lost', $updateRes->json()['status']);
+        $this->assertSame('Hilang di gerbang timur', $updateRes->json()['note']);
 
         $deleteRes = $this->actingAs($this->admin)->deleteJson("/api/vehicle-cards/{$cardId}");
         $deleteRes->assertStatus(200);

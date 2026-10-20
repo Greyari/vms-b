@@ -7,14 +7,13 @@ return [
     | Visitor / blacklist import row cap
     |--------------------------------------------------------------------------
     |
-    | Hard ceiling on the number of data rows a single CSV/XLSX import may
-    | contain. The importer aborts with a 422 before touching the database
-    | when a file exceeds this, so a huge or malformed upload can't lock the
-    | visitors table inside one long transaction.
+    | Ceiling on the number of data rows a single CSV/XLSX import may contain.
+    | Set to 0 for unlimited rows (no restriction). A positive number caps the
+    | row count and aborts with a 422 before touching the database.
     |
     */
 
-    'import_max_rows' => 2000,
+    'import_max_rows' => (int) env('VMS_IMPORT_MAX_ROWS', 0),
 
     /*
     |--------------------------------------------------------------------------
