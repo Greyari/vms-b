@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\PreRegistrationStatus;
+use App\Services\MasterImportService;
 use App\Support\IdentityNumber;
 use App\Traits\HasUuidV7;
 use Illuminate\Database\Eloquent\Casts\Attribute;
@@ -54,6 +55,11 @@ class PreRegistration extends Model
     protected function idNumber(): Attribute
     {
         return Attribute::make(set: fn (?string $value): string => IdentityNumber::normalize($value));
+    }
+
+    protected function gender(): Attribute
+    {
+        return Attribute::make(set: fn (?string $value) => MasterImportService::parseGender($value));
     }
 
     public function visit(): BelongsTo

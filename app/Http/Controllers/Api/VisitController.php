@@ -20,6 +20,7 @@ use App\Models\Visit;
 use App\Models\Visitor;
 use App\Models\VisitorCard;
 use App\Services\ActivityLogger;
+use App\Services\MasterImportService;
 use App\Support\GlobalBlacklistCheck;
 use App\Support\IdentityNumber;
 use App\Support\NumberingRetry;
@@ -200,7 +201,7 @@ class VisitController extends Controller
             'staff_id' => 'bail|required_without:host_name|nullable|uuid|exists:staff,id',
             'host_name' => 'bail|required_without:staff_id|nullable|string|max:255',
             'visitor_type' => ['sometimes', 'nullable', Rule::enum(VisitorType::class)],
-            'gender' => ['nullable', Rule::in(['M', 'F'])],
+            'gender' => ['nullable', Rule::in(['M', 'F', 'Male', 'Female', 'male', 'female', 'L', 'P', 'laki-laki', 'perempuan', 'pria', 'wanita'])],
             'birth_date' => ['nullable', 'date', 'before_or_equal:today'],
             'birth_place' => ['nullable', 'string', 'max:255'],
             'nationality' => ['nullable', 'string', 'max:255'],
@@ -230,6 +231,10 @@ class VisitController extends Controller
             'override_global_blacklist' => ['sometimes', 'boolean'],
             'override_reason' => ['required_if_accepted:override_global_blacklist', 'nullable', 'string', 'min:10', 'max:500'],
         ]);
+
+        if (array_key_exists('gender', $validated)) {
+            $validated['gender'] = MasterImportService::parseGender($validated['gender']);
+        }
 
         // The blacklist gate runs BEFORE the transaction: rejecting here avoids
         // opening one at all for a blocked visitor, and avoids re-running the

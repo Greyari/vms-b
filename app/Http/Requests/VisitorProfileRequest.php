@@ -48,7 +48,7 @@ class VisitorProfileRequest extends FormRequest
             'name' => ['required', 'string', 'max:255'],
             'company' => ['nullable', 'string', 'max:255'],
             'visitor_type' => ['sometimes', Rule::enum(VisitorType::class)],
-            'gender' => ['nullable', Rule::in(['M', 'F'])],
+            'gender' => ['nullable', Rule::in(['M', 'F', 'Male', 'Female', 'male', 'female', 'L', 'P', 'laki-laki', 'perempuan', 'pria', 'wanita'])],
             'birth_date' => ['nullable', 'date', 'before_or_equal:today'],
             'birth_place' => ['nullable', 'string', 'max:255'],
             'nationality' => ['nullable', 'string', 'max:255'],

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\VisitorType;
+use App\Services\MasterImportService;
 use App\Support\IdentityNumber;
 use App\Support\SequenceLock;
 use App\Traits\HasUuidV7;
@@ -53,6 +54,16 @@ class Visitor extends Model
             'seaman_book_expires_at' => 'date',
             'blacklisted_at' => 'date',
         ];
+    }
+
+    /**
+     * Normalize gender to 'M' or 'F' so it fits the character(1) column and matches imports.
+     */
+    protected function gender(): Attribute
+    {
+        return Attribute::make(
+            set: fn (?string $value) => MasterImportService::parseGender($value),
+        );
     }
 
     protected static function booted(): void
