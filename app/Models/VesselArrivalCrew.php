@@ -35,6 +35,16 @@ class VesselArrivalCrew extends Pivot
         ];
     }
 
+    public function vesselArrival()
+    {
+        return $this->belongsTo(VesselArrival::class, 'vessel_arrival_id');
+    }
+
+    public function visitor()
+    {
+        return $this->belongsTo(Visitor::class, 'visitor_id');
+    }
+
     protected static function booted(): void
     {
         static::creating(function (VesselArrivalCrew $pivot): void {
