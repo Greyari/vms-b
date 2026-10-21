@@ -57,6 +57,11 @@ class VmsOldImporter
             return;
         }
 
+        // Ekspor PowerShell menulis UTF-8 dengan BOM; lewati BOM sebelum parsing agar tanda kutip header terbaca.
+        if (fread($handle, 3) !== "\xEF\xBB\xBF") {
+            rewind($handle);
+        }
+
         $headers = fgetcsv($handle);
         if (! $headers) {
             fclose($handle);
@@ -121,9 +126,17 @@ class VmsOldImporter
                 $this->report->incrementUpdated('nationalities');
             } else {
                 if (! $dryRun) {
-                    $nat = new Nationality($transformed['attributes']);
-                    $nat->id = (string) Str::uuid7();
-                    $nat->save();
+                    // Nama kebangsaan unik: pakai yang sudah ada (mis. dua kode lama untuk "Samoa").
+                    $nat = Nationality::query()
+                        ->whereRaw('LOWER(name) = ?', [mb_strtolower($transformed['attributes']['name'])])
+                        ->first();
+
+                    if (! $nat) {
+                        $nat = new Nationality($transformed['attributes']);
+                        $nat->id = (string) Str::uuid7();
+                        $nat->save();
+                    }
+
                     $targetId = $nat->id;
                     $this->mappingManager->put('vms-old', 'nationalities', $sourceKey, $targetId);
                 } else {
@@ -164,9 +177,15 @@ class VmsOldImporter
                 $this->report->incrementUpdated('locations');
             } else {
                 if (! $dryRun) {
-                    $loc = new Location($transformed['attributes']);
-                    $loc->id = (string) Str::uuid7();
-                    $loc->save();
+                    // Kode unik: jika sudah ada di VMS baru, tautkan saja tanpa menimpa.
+                    $loc = Location::query()
+                        ->whereRaw('LOWER(code) = ?', [mb_strtolower($transformed['attributes']['code'])])
+                        ->first();
+                    if (! $loc) {
+                        $loc = new Location($transformed['attributes']);
+                        $loc->id = (string) Str::uuid7();
+                        $loc->save();
+                    }
                     $targetId = $loc->id;
                     $this->mappingManager->put('vms-old', 'locations', $sourceKey, $targetId);
                 } else {
@@ -208,9 +227,12 @@ class VmsOldImporter
                 $this->report->incrementUpdated('staff');
             } else {
                 if (! $dryRun) {
-                    $staff = new Staff($transformed['attributes']);
-                    $staff->id = (string) Str::uuid7();
-                    $staff->save();
+                    $staff = Staff::query()->where('staff_id', $transformed['attributes']['staff_id'] ?? null)->first();
+                    if (! $staff) {
+                        $staff = new Staff($transformed['attributes']);
+                        $staff->id = (string) Str::uuid7();
+                        $staff->save();
+                    }
                     $targetId = $staff->id;
                     $this->mappingManager->put('vms-old', 'staff', $sourceKey, $targetId);
                 } else {
@@ -251,9 +273,12 @@ class VmsOldImporter
                 $this->report->incrementUpdated('cards');
             } else {
                 if (! $dryRun) {
-                    $card = new VisitorCard($transformed['attributes']);
-                    $card->id = (string) Str::uuid7();
-                    $card->save();
+                    $card = VisitorCard::query()->where('card_no', $transformed['attributes']['card_no'] ?? null)->first();
+                    if (! $card) {
+                        $card = new VisitorCard($transformed['attributes']);
+                        $card->id = (string) Str::uuid7();
+                        $card->save();
+                    }
                     $targetId = $card->id;
                     $this->mappingManager->put('vms-old', 'cards', $sourceKey, $targetId);
                 } else {
@@ -296,10 +321,30 @@ class VmsOldImporter
                 $this->report->incrementUpdated('visitors');
             } else {
                 if (! $dryRun) {
-                    $vis = new Visitor($group['attributes']);
-                    $vis->id = (string) Str::uuid7();
-                    $vis->visitor_no = (int) $canonicalId;
-                    $vis->save();
+                    // Sudah ada di VMS baru (id_type + id_number sama)? Tautkan saja tanpa menimpa data,
+                    // hanya isi kapal bila masih kosong.
+                    $existing = ($group['attributes']['id_number'] ?? '') !== ''
+                        ? Visitor::query()
+                            ->where('id_type', $group['attributes']['id_type'])
+                            ->where('id_number', $group['attributes']['id_number'])
+                            ->first()
+                        : null;
+
+                    if ($existing) {
+                        if ($existing->vessel_id === null && ! empty($group['attributes']['vessel_id'])) {
+                            $existing->vessel_id = $group['attributes']['vessel_id'];
+                            $existing->save();
+                        }
+                        $vis = $existing;
+                    } else {
+                        $vis = new Visitor($group['attributes']);
+                        $vis->id = (string) Str::uuid7();
+                        // Pertahankan nomor lama; jika sudah dipakai visitor lain, biarkan model memberi nomor baru.
+                        if (! Visitor::query()->where('visitor_no', (int) $canonicalId)->exists()) {
+                            $vis->visitor_no = (int) $canonicalId;
+                        }
+                        $vis->save();
+                    }
                     $targetId = $vis->id;
                 } else {
                     $targetId = 'dry-run-vis-'.$canonicalId;

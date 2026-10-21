@@ -105,7 +105,8 @@ class ImportVerifyCommand extends Command
             return false;
         }
 
-        $manifest = json_decode(File::get($manifestPath), true);
+        // manifest.json dari ekspor PowerShell memakai UTF-8 BOM; buang agar JSON terbaca.
+        $manifest = json_decode(ltrim(File::get($manifestPath), "\xEF\xBB\xBF"), true);
         if (! isset($manifest['tables']) || ! is_array($manifest['tables'])) {
             $this->error('Check 1 (Entity Row Counts) FAILED: invalid manifest.json format.');
 

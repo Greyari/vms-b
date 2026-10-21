@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Mengekspor 9 tabel VMS-old dari SQL Server ke CSV ber-quote RFC 4180 streaming.
 .DESCRIPTION
@@ -18,6 +18,12 @@ param(
 
     [Parameter(Mandatory = $false)]
     [datetime]$Since = [datetime]::MinValue,
+
+    # Batasi hanya tabel transaksi (kunjungan, kedatangan kapal, crew) mulai tanggal ini.
+    # ESSVisitorMaster hanya memuat visitor yang berkunjung sejak tanggal itu, crew kapal (IMONo terisi), atau pernah tercatat di ESSCrewTransaction.
+    # Master kapal, kartu, dan staff tetap diekspor penuh.
+    [Parameter(Mandatory = $false)]
+    [datetime]$TransactionSince = [datetime]::MinValue,
 
     [Parameter(Mandatory = $false)]
     [System.Management.Automation.PSCredential]$Credential,
@@ -66,10 +72,10 @@ $tables = @(
     @{ Name = "ESSVesselMaster"; Query = "SELECT IMONo, Description, CallSign, Sign, NationalityFlag, Port, Type, Captain, LocalCompanyAgent, LocalCompanyAgentName, LocalCompanyAgentPhoneNo, LocalCompanyAgentLocation, ForeignCompanyAgent, ForeignCompanyAgentName, ForeignCompanyAgentPhoneNo, ForeignCompanyAgentLocation, Note, isVessel, LastModifiedBy, LastModifiedDate FROM ESSVesselMaster"; Incremental = $true },
     @{ Name = "ESSStaffToVisit"; Query = "SELECT StaffID, StaffFullName, StaffGender, StaffBirthDate, StaffCompany, StaffAddress, StaffOccupation, VisitorStatus, Note, LastModifiedBy, LastModifiedDate FROM ESSStaffToVisit"; Incremental = $true },
     @{ Name = "ESSVisitorCardMaster"; Query = "SELECT CardNo, AbsenteeismNo, ActiveStatus, Note, LastModifiedBy, LastModifiedDate FROM ESSVisitorCardMaster"; Incremental = $true },
-    @{ Name = "ESSVisitorMaster"; Query = "SELECT VisitorID, VisitorIDType, VisitorIDNumber, VisitorFullName, VisitorGender, VisitorBirthDate, VisitorCompany, VisitorAddress, VisitorOccupation, VisitorType, VisitorStatus, Note, LastModifiedBy, LastModifiedDate, IMONo, ExpiryDate, IssueDate, SeamanBookExpiryDate, PhoneNo, PlaceofBirth, Certificate, CertificateNo, SeamanBookNo FROM ESSVisitorMaster"; Incremental = $true },
-    @{ Name = "ESSVisitorRegistration"; Query = "SELECT VisitorID, CardNo, TransactionDate, SequenceNo, VehicleNo, EmployeeToVisit, VisitLocation, VisitPurpose, CheckInTime, CheckOutTime, Note, LastModifiedBy, LastModifiedDate, VisitorRegistrationNo, VisitorCompany, StaffID FROM ESSVisitorRegistration"; Incremental = $true },
-    @{ Name = "ESSVesselTransaction"; Query = "SELECT SequenceNo, IMONo, AssignmentSignIn, AssignmentSignOut, PortSignIn, PortSignOut, Captain, LocalCompanyAgent, LocalCompanyAgentName, LocalCompanyAgentPhoneNo, LocalCompanyAgentLocation, ForeignCompanyAgent, ForeignCompanyAgentName, ForeignCompanyAgentPhoneNo, ForeignCompanyAgentLocation, Note, LastModifiedBy, LastModifiedDate FROM ESSVesselTransaction"; Incremental = $true },
-    @{ Name = "ESSCrewTransaction"; Query = "SELECT SequenceNo, IMONo, VisitorID, Note, LastModifiedBy, LastModifiedDate, TransactionID FROM ESSCrewTransaction"; Incremental = $true },
+    @{ Name = "ESSVisitorMaster"; Query = "SELECT VisitorID, VisitorIDType, VisitorIDNumber, VisitorFullName, VisitorGender, VisitorBirthDate, VisitorCompany, VisitorAddress, VisitorOccupation, VisitorType, VisitorStatus, Note, LastModifiedBy, LastModifiedDate, IMONo, ExpiryDate, IssueDate, SeamanBookExpiryDate, PhoneNo, PlaceofBirth, Certificate, CertificateNo, SeamanBookNo FROM ESSVisitorMaster"; Incremental = $true; TxWhere = "(VisitorID IN (SELECT VisitorID FROM ESSVisitorRegistration WHERE TransactionDate >= @TxSince) OR ISNULL(LTRIM(RTRIM(IMONo)), '') <> '' OR CAST(VisitorID AS varchar(25)) IN (SELECT VisitorID FROM ESSCrewTransaction))" },
+    @{ Name = "ESSVisitorRegistration"; Query = "SELECT VisitorID, CardNo, TransactionDate, SequenceNo, VehicleNo, EmployeeToVisit, VisitLocation, VisitPurpose, CheckInTime, CheckOutTime, Note, LastModifiedBy, LastModifiedDate, VisitorRegistrationNo, VisitorCompany, StaffID FROM ESSVisitorRegistration"; Incremental = $true; TxWhere = "TransactionDate >= @TxSince" },
+    @{ Name = "ESSVesselTransaction"; Query = "SELECT SequenceNo, IMONo, AssignmentSignIn, AssignmentSignOut, PortSignIn, PortSignOut, Captain, LocalCompanyAgent, LocalCompanyAgentName, LocalCompanyAgentPhoneNo, LocalCompanyAgentLocation, ForeignCompanyAgent, ForeignCompanyAgentName, ForeignCompanyAgentPhoneNo, ForeignCompanyAgentLocation, Note, LastModifiedBy, LastModifiedDate FROM ESSVesselTransaction"; Incremental = $true; TxWhere = "AssignmentSignIn >= @TxSince" },
+    @{ Name = "ESSCrewTransaction"; Query = "SELECT SequenceNo, IMONo, VisitorID, Note, LastModifiedBy, LastModifiedDate, TransactionID FROM ESSCrewTransaction"; Incremental = $true; TxWhere = "TransactionID IN (SELECT SequenceNo FROM ESSVesselTransaction WHERE AssignmentSignIn >= @TxSince)" },
     @{ Name = "EmployeeMaster"; Query = "SELECT p.EmployeeNo, p.StatusAdmin, m.FullName FROM EmployeeSelfServicePassword p LEFT JOIN EmployeeMaster m ON p.EmployeeNo = m.EmployeeNo"; Incremental = $false }
 )
 
@@ -92,12 +98,22 @@ try {
             $sql += $clause
         }
 
+        $useTx = ($TransactionSince -gt [datetime]::MinValue) -and $tbl.ContainsKey("TxWhere")
+        if ($useTx) {
+            $sql += $(if ($sql -match "WHERE") { " AND " } else { " WHERE " }) + $tbl.TxWhere
+        }
+
         $cmd = $conn.CreateCommand()
         $cmd.CommandText = $sql
         $cmd.CommandTimeout = 3600
         if ($tbl.Incremental -and $Since -gt [datetime]::MinValue) {
             $param = $cmd.Parameters.Add("@Since", [System.Data.SqlDbType]::DateTime)
             $param.Value = $Since
+        }
+
+        if ($useTx) {
+            $pTx = $cmd.Parameters.Add("@TxSince", [System.Data.SqlDbType]::DateTime)
+            $pTx.Value = $TransactionSince
         }
 
         $reader = $cmd.ExecuteReader()
