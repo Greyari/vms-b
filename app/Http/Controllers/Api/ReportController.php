@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\VisitResource;
 use App\Models\VesselArrival;
+use App\Models\VesselArrivalCrew;
 use App\Models\Visit;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
@@ -371,6 +372,149 @@ class ReportController extends Controller
         }
 
         $query->orderBy('sign_in_date', 'desc')->orderBy('created_at', 'desc');
+
+        return $query;
+    }
+
+    public function crew(Request $request): JsonResponse
+    {
+        $query = $this->buildCrewQuery($request);
+
+        if ($request->boolean('print') || $request->input('limit') === 'print') {
+            $count = (clone $query)->count();
+            if ($count > 5000) {
+                return response()->json([
+                    'message' => 'Print and export limit of 5,000 rows exceeded. Please narrow your date range or filters.',
+                ], 422);
+            }
+
+            return response()->json($query->take(5000)->get());
+        }
+
+        $perPage = max(1, min((int) $request->input('per_page', 50), 100));
+
+        return response()->json($query->paginate($perPage));
+    }
+
+    public function exportCrew(Request $request)
+    {
+        $query = $this->buildCrewQuery($request);
+
+        return response()->streamDownload(function () use ($query) {
+            $writer = SimpleExcelWriter::streamDownload('vessel-crew-report.xlsx');
+
+            $query->chunk(500, function ($placements) use ($writer) {
+                foreach ($placements as $placement) {
+                    $crew = $placement->visitor;
+                    $arrival = $placement->vesselArrival;
+
+                    $statusLabel = match ($placement->status) {
+                        'checked_in' => 'Di Kapal (Checked-In)',
+                        'checked_out' => 'Sudah Turun (Checked-Out)',
+                        'expected' => 'Belum Check-In (Expected)',
+                        default => ucfirst((string) $placement->status),
+                    };
+
+                    $writer->addRow([
+                        'No Kru' => $crew?->visitor_no ?? '-',
+                        'Nama Kru' => $crew?->name ?? '-',
+                        'Tipe ID' => strtoupper($crew?->id_type ?? '-'),
+                        'Nomor ID' => $crew?->id_number ?? '-',
+                        'Jenis Kelamin' => $crew?->gender ?? '-',
+                        'Kebangsaan' => $crew?->nationality ?? '-',
+                        'Perusahaan' => $crew?->company ?? '-',
+                        'Jabatan / Occupation' => $crew?->occupation ?? '-',
+                        'Buku Pelaut' => $crew?->seaman_book_no ?? '-',
+                        'No Sertifikat' => $crew?->certificate_no ?: ($crew?->certificate ?? '-'),
+                        'Nama Kapal' => $arrival?->vessel_name ?? $arrival?->vessel?->name ?? '-',
+                        'Kode / IMO Kapal' => $arrival?->vessel?->code ?? '-',
+                        'Call Sign' => $arrival?->vessel?->call_sign ?? '-',
+                        'Bendera' => $arrival?->vessel?->flag ?? '-',
+                        'Nakhoda / Captain' => $arrival?->captain ?? '-',
+                        'Status Penempatan' => $statusLabel,
+                        'Waktu Check-In' => $placement->checked_in_at ? Carbon::parse($placement->checked_in_at)->format('d/m/Y H:i') : '-',
+                        'Waktu Check-Out' => $placement->checked_out_at ? Carbon::parse($placement->checked_out_at)->format('d/m/Y H:i') : '-',
+                        'Tgl Masuk Kapal (Sign-In)' => $arrival?->sign_in_date ? Carbon::parse($arrival->sign_in_date)->format('d/m/Y') : '-',
+                        'Pelabuhan Asal' => $arrival?->sign_in_port ?? '-',
+                        'Tgl Keluar Kapal (Sign-Out)' => $arrival?->sign_out_date ? Carbon::parse($arrival->sign_out_date)->format('d/m/Y') : '-',
+                        'Pelabuhan Tujuan' => $arrival?->sign_out_port ?? '-',
+                        'Agen Lokal' => $arrival?->local_agent_company ?? '-',
+                        'Agen Luar Negeri' => $arrival?->foreign_agent_company ?? '-',
+                        'Catatan' => $placement->notes ?? '-',
+                    ]);
+                }
+            });
+        }, 'vessel-crew-report.xlsx');
+    }
+
+    public function buildCrewQuery(Request $request): Builder
+    {
+        $query = VesselArrivalCrew::query()
+            ->with([
+                'vesselArrival.vessel',
+                'visitor',
+            ]);
+
+        // Search across crew name, id_number, seaman_book_no, certificate_no, company, or vessel_name
+        if ($request->filled('search')) {
+            $term = '%'.strtolower(addcslashes(trim((string) $request->input('search')), '%_\\')).'%';
+            $query->where(function ($q) use ($term) {
+                $q->whereHas('visitor', function ($vq) use ($term) {
+                    $vq->whereRaw('LOWER(name) LIKE ?', [$term])
+                        ->orWhereRaw('LOWER(id_number) LIKE ?', [$term])
+                        ->orWhereRaw('LOWER(COALESCE(seaman_book_no, \'\')) LIKE ?', [$term])
+                        ->orWhereRaw('LOWER(COALESCE(certificate_no, \'\')) LIKE ?', [$term])
+                        ->orWhereRaw('LOWER(COALESCE(company, \'\')) LIKE ?', [$term]);
+                })->orWhereHas('vesselArrival', function ($aq) use ($term) {
+                    $aq->whereRaw('LOWER(vessel_name) LIKE ?', [$term])
+                        ->orWhereRaw('LOWER(COALESCE(captain, \'\')) LIKE ?', [$term]);
+                });
+            });
+        }
+
+        // Vessel filter (name or id)
+        if ($request->filled('vessel_name')) {
+            $term = '%'.strtolower(addcslashes(trim((string) $request->input('vessel_name')), '%_\\')).'%';
+            $query->whereHas('vesselArrival', fn ($aq) => $aq->whereRaw('LOWER(vessel_name) LIKE ?', [$term]));
+        }
+        if ($request->filled('vessel_arrival_id')) {
+            $query->where('vessel_arrival_id', $request->input('vessel_arrival_id'));
+        }
+
+        // Status filter: expected, checked_in, checked_out
+        if ($request->filled('status') && $request->input('status') !== 'all') {
+            $query->where('status', $request->input('status'));
+        }
+
+        // Nationality
+        if ($request->filled('nationality')) {
+            $term = '%'.strtolower(addcslashes(trim((string) $request->input('nationality')), '%_\\')).'%';
+            $query->whereHas('visitor', fn ($vq) => $vq->whereRaw('LOWER(COALESCE(nationality, \'\')) LIKE ?', [$term]));
+        }
+
+        // Company
+        if ($request->filled('company')) {
+            $term = '%'.strtolower(addcslashes(trim((string) $request->input('company')), '%_\\')).'%';
+            $query->whereHas('visitor', fn ($vq) => $vq->whereRaw('LOWER(COALESCE(company, \'\')) LIKE ?', [$term]));
+        }
+
+        // Date range (applies to checked_in_at or vessel_arrival sign_in_date)
+        if ($request->filled('date_from')) {
+            $query->where(function ($q) use ($request) {
+                $q->whereDate('checked_in_at', '>=', $request->input('date_from'))
+                    ->orWhereHas('vesselArrival', fn ($aq) => $aq->where('sign_in_date', '>=', $request->input('date_from')));
+            });
+        }
+        if ($request->filled('date_to')) {
+            $query->where(function ($q) use ($request) {
+                $q->whereDate('checked_in_at', '<=', $request->input('date_to'))
+                    ->orWhereHas('vesselArrival', fn ($aq) => $aq->where('sign_in_date', '<=', $request->input('date_to')));
+            });
+        }
+
+        // Ordering: active status first, then newest created_at
+        $query->orderByRaw("CASE WHEN status = 'checked_in' THEN 1 WHEN status = 'expected' THEN 2 ELSE 3 END")
+            ->orderBy('created_at', 'desc');
 
         return $query;
     }

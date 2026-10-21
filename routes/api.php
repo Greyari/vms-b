@@ -66,6 +66,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/reports/visits', [ReportController::class, 'visits']);
         Route::get('/visits/history', [ReportController::class, 'visits']);
         Route::get('/reports/vessels', [ReportController::class, 'vessels']);
+        Route::get('/reports/crew', [ReportController::class, 'crew']);
 
         Route::middleware('permission:export_visits')->group(function () {
             Route::get('/reports/visits/export', [ReportController::class, 'exportVisits']);
@@ -73,6 +74,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/visits/export', [ReportController::class, 'exportVisits']);
             Route::get('/visits/export-pdf', [ReportController::class, 'exportVisitsPdf']);
             Route::get('/reports/vessels/export', [ReportController::class, 'exportVessels']);
+            Route::get('/reports/crew/export', [ReportController::class, 'exportCrew']);
         });
     });
 
