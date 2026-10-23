@@ -111,6 +111,23 @@ class ImportArrivalCrewCommand extends Command
 
         $this->info("Read {$totalRawRows} arrival rows across ".count($rowsByImo).' distinct vessels.');
 
+        // Pre-calculate the globally latest arrival for each visitor across the entire file
+        $globalLatestArrivalForVisitor = [];
+        foreach ($rowsByImo as $imo => $rows) {
+            foreach ($rows as $r) {
+                $vKey = $r['visitor_id'] > 0 ? (string) $r['visitor_id'] : $r['id_number_raw'];
+                if ($vKey === '') {
+                    continue;
+                }
+                if (! isset($globalLatestArrivalForVisitor[$vKey]) || $r['arrival_at'] > $globalLatestArrivalForVisitor[$vKey]['arrival_at']) {
+                    $globalLatestArrivalForVisitor[$vKey] = [
+                        'arrival_at' => $r['arrival_at'],
+                        'imo' => $imo,
+                    ];
+                }
+            }
+        }
+
         // Pre-load reference maps
         $locMap = Location::withTrashed()->pluck('id', 'code')->all();
         $visitorMap = Visitor::whereNotNull('visitor_no')->pluck('id', 'visitor_no')->all();
@@ -124,9 +141,11 @@ class ImportArrivalCrewCommand extends Command
         $crewCheckedIn = 0;
         $crewCheckedOut = 0;
         $autoCreatedVisitors = 0;
+        $activeAssignedVisitors = [];
 
         $dbWork = function () use (
             $rowsByImo,
+            $globalLatestArrivalForVisitor,
             $locMap,
             &$visitorMap,
             &$visitorByIdMap,
@@ -141,7 +160,8 @@ class ImportArrivalCrewCommand extends Command
             &$crewPlaced,
             &$crewCheckedIn,
             &$crewCheckedOut,
-            &$autoCreatedVisitors
+            &$autoCreatedVisitors,
+            &$activeAssignedVisitors
         ) {
             foreach ($rowsByImo as $imo => $rows) {
                 if (! isset($locMap[$imo])) {
@@ -272,26 +292,60 @@ class ImportArrivalCrewCommand extends Command
                         }
                         $seenCrewInVoyage[$uuid] = true;
 
+                        // Check if this is the single globally latest arrival for this visitor
+                        $vKey = $cr['visitor_id'] > 0 ? (string) $cr['visitor_id'] : $cr['id_number_raw'];
+                        $isGlobalLatest = isset($globalLatestArrivalForVisitor[$vKey])
+                            && $globalLatestArrivalForVisitor[$vKey]['arrival_at'] === $cr['arrival_at']
+                            && $globalLatestArrivalForVisitor[$vKey]['imo'] === $imo;
+
                         $hasMoved = ! empty($cr['next_arrival_at']);
                         $isDeparted = ($signOutDate !== null);
+                        $crewInactiveDays = $cr['crew_last_seen'] ? Carbon::parse($cr['crew_last_seen'])->diffInDays($now) : 999;
+                        $isCrewStale = ($crewInactiveDays > 30); // Crew has not been seen on board for > 30 days
 
-                        if ($isDeparted || $hasMoved) {
-                            $status = 'checked_out';
-                            $checkedInAt = Carbon::parse($cr['arrival_at']);
-                            $checkedOutAt = $hasMoved
-                                ? Carbon::parse($cr['next_arrival_at'])
-                                : ($cr['crew_last_seen'] ? Carbon::parse($cr['crew_last_seen']) : Carbon::parse($signOutDate));
-                            $crewCheckedOut++;
-                        } else {
+                        // A crew can ONLY be checked_in if:
+                        // 1. Vessel is currently in port ($signOutDate === null)
+                        // 2. This is the crew's globally latest arrival across all vessels ($isGlobalLatest)
+                        // 3. Crew has not moved to another vessel (!$hasMoved)
+                        // 4. Crew was active on board recently (!$isCrewStale)
+                        // 5. This visitor has not already been assigned as checked_in in this import run
+                        $canBeCheckedIn = ! $isDeparted && $isGlobalLatest && ! $hasMoved && ! $isCrewStale && ! isset($activeAssignedVisitors[$uuid]);
+
+                        if ($canBeCheckedIn) {
                             $status = 'checked_in';
                             $checkedInAt = Carbon::parse($cr['arrival_at']);
                             $checkedOutAt = null;
                             $crewCheckedIn++;
+                            $activeAssignedVisitors[$uuid] = true;
+                        } else {
+                            $status = 'checked_out';
+                            $checkedInAt = Carbon::parse($cr['arrival_at']);
+                            $checkedOutAt = $hasMoved
+                                ? Carbon::parse($cr['next_arrival_at'])
+                                : ($cr['crew_last_seen'] ? Carbon::parse($cr['crew_last_seen']) : ($signOutDate ? Carbon::parse($signOutDate) : $checkedInAt));
+                            if ($checkedOutAt < $checkedInAt) {
+                                $checkedOutAt = $checkedInAt;
+                            }
+                            $crewCheckedOut++;
                         }
 
                         $crewPlaced++;
 
                         if (! $dryRun) {
+                            // If marking checked_in, ensure any prior active placement in the database is closed
+                            if ($status === 'checked_in') {
+                                DB::table('vessel_arrival_crew')
+                                    ->where('visitor_id', $uuid)
+                                    ->where('vessel_arrival_id', '!=', $vesselArrivalId)
+                                    ->whereIn('status', ['expected', 'checked_in'])
+                                    ->update([
+                                        'status' => 'checked_out',
+                                        'checked_out_at' => $checkedInAt,
+                                        'notes' => 'Auto checked out due to arrival on new vessel',
+                                        'updated_at' => now(),
+                                    ]);
+                            }
+
                             // Check existing pivot
                             $existingPivot = DB::table('vessel_arrival_crew')
                                 ->where('vessel_arrival_id', $vesselArrivalId)
