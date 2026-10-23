@@ -119,3 +119,14 @@ it('lets a supervisor add a location', function () {
     $this->postJson('/api/locations', ['type' => 'tug_boat', 'code' => 'IMO9000010', 'name' => 'TB. SAMPLE SUP'])
         ->assertCreated();
 });
+
+it('allows fetching master data with per_page >= 1000 without 1000 cap', function () {
+    actingAsSecurity();
+
+    $response = $this->getJson('/api/locations?per_page=1000')
+        ->assertOk();
+
+    // When requested without 'page' and per_page >= 1000, per_page expands to at least 100000
+    expect($response->json('per_page'))->toBeGreaterThanOrEqual(100000);
+});
+

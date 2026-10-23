@@ -69,7 +69,10 @@ class StaffController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $perPage = max(1, min((int) $request->input('per_page', 100), 1000));
+        $requestedPerPage = (int) $request->input('per_page', 100);
+        $perPage = (! $request->has('page') && $requestedPerPage >= 1000)
+            ? max($requestedPerPage, 100000)
+            : max(1, min($requestedPerPage, 100000));
 
         return response()->json($this->filteredStaff($request)->orderBy('name')->paginate($perPage));
     }
