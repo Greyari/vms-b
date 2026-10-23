@@ -38,6 +38,15 @@ class VmsOldImporter
     /** @var array<string, string> */
     protected array $cardMap = [];
 
+    protected bool $skipCards = false;
+
+    public function setSkipCards(bool $skip): self
+    {
+        $this->skipCards = $skip;
+
+        return $this;
+    }
+
     public function __construct(
         protected MappingManager $mappingManager,
         protected ImportReport $report
@@ -91,7 +100,9 @@ class VmsOldImporter
             $this->importNationalities($path, $dryRun);
             $this->importLocations($path, $dryRun);
             $this->importStaff($path, $dryRun);
-            $this->importCards($path, $dryRun);
+            if (! $this->skipCards) {
+                $this->importCards($path, $dryRun);
+            }
             $this->importVisitors($path, $dryRun);
             $this->importVisits($path, $dryRun);
             $this->importVesselArrivals($path, $dryRun);
@@ -390,9 +401,9 @@ class VmsOldImporter
             }
 
             $sourceKey = $transformed['source_key'];
-            $cardId = $transformed['card_id'];
+            $cardId = $this->skipCards ? null : $transformed['card_id'];
 
-            if ($transformed['is_orphan_card'] && ! empty($transformed['raw_card_no'])) {
+            if (! $this->skipCards && $transformed['is_orphan_card'] && ! empty($transformed['raw_card_no'])) {
                 $rawCardNo = $transformed['raw_card_no'];
                 if (! isset($this->cardMap[$rawCardNo])) {
                     if (! $dryRun) {

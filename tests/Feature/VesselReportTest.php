@@ -7,6 +7,7 @@ use App\Models\Visitor;
 it('forbids unauthenticated user from accessing vessel report and export', function () {
     $this->getJson('/api/reports/vessels')->assertUnauthorized();
     $this->getJson('/api/reports/vessels/export')->assertUnauthorized();
+    $this->getJson('/api/reports/vessels/pdf')->assertUnauthorized();
 });
 
 it('forbids security role from accessing vessel report and export', function () {
@@ -14,6 +15,7 @@ it('forbids security role from accessing vessel report and export', function () 
 
     $this->getJson('/api/reports/vessels')->assertForbidden();
     $this->getJson('/api/reports/vessels/export')->assertForbidden();
+    $this->getJson('/api/reports/vessels/pdf')->assertForbidden();
 });
 
 it('lists vessels in list_ships mode with total_days calculation', function () {
@@ -166,4 +168,37 @@ it('exports vessels report to excel stream download in list_ships_with_crew mode
     $res->assertOk();
     expect($res->headers->get('content-disposition'))->toContain('attachment');
     expect($res->headers->get('content-disposition'))->toContain('vessel-report.xlsx');
+});
+
+it('exports vessels report to landscape a4 pdf download in list_ships mode', function () {
+    actingAsSupervisor();
+
+    $vessel = Location::factory()->create(['name' => 'MV. PDF SHIP']);
+    VesselArrival::factory()->create([
+        'location_id' => $vessel->id,
+        'vessel_name' => 'MV. PDF SHIP',
+        'sign_in_date' => '2026-10-10',
+    ]);
+
+    $res = $this->get('/api/reports/vessels/pdf?mode=list_ships&date_from=2026-10-01&date_to=2026-10-15');
+    $res->assertOk();
+    expect($res->headers->get('content-type'))->toBe('application/pdf');
+    expect($res->headers->get('content-disposition'))->toContain('vessel-report.pdf');
+});
+
+it('exports vessels report to landscape a4 pdf download in list_ships_with_crew mode', function () {
+    actingAsSupervisor();
+
+    $vessel = Location::factory()->create(['name' => 'MV. PDF SHIP CREW']);
+    $arr = VesselArrival::factory()->create([
+        'location_id' => $vessel->id,
+        'vessel_name' => 'MV. PDF SHIP CREW',
+    ]);
+    $crew = Visitor::factory()->crew($vessel)->create(['name' => 'PDF Crew Member']);
+    $arr->crew()->attach($crew->id);
+
+    $res = $this->get('/api/reports/vessels/pdf?mode=list_ships_with_crew');
+    $res->assertOk();
+    expect($res->headers->get('content-type'))->toBe('application/pdf');
+    expect($res->headers->get('content-disposition'))->toContain('vessel-crew-manifest-report.pdf');
 });

@@ -23,7 +23,8 @@ class ImportCommand extends Command
     protected $signature = 'vms:import
                             {--source= : Source data to import (vms-old or pilot)}
                             {--path= : Path to data folder containing CSV files and manifest.json}
-                            {--dry-run : Simulate import without persisting changes}';
+                            {--dry-run : Simulate import without persisting changes}
+                            {--skip-cards : Skip importing visitor cards and generating orphan cards from visits}';
 
     /**
      * The console command description.
@@ -87,8 +88,11 @@ class ImportCommand extends Command
 
         $this->info("Starting import from [{$source}] at [{$path}]...");
 
+        $skipCards = (bool) $this->option('skip-cards');
+
         if ($source === 'vms-old') {
             $importer = new VmsOldImporter($mappingManager, $report);
+            $importer->setSkipCards($skipCards);
             $importer->import($path, $dryRun);
         } else {
             $importer = new PilotImporter($mappingManager, $report);
@@ -96,7 +100,7 @@ class ImportCommand extends Command
         }
 
         // Synchronize card status: in_use for cards on open visits, available for all others
-        if (! $dryRun) {
+        if (! $dryRun && ! $skipCards) {
             $inUseCardIds = DB::table('visit_visitor_card')
                 ->join('visits', 'visit_visitor_card.visit_id', '=', 'visits.id')
                 ->whereNull('visits.checked_out_at')

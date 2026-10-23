@@ -310,6 +310,32 @@ class ReportController extends Controller
         }, 'vessel-report.xlsx');
     }
 
+    public function exportVesselsPdf(Request $request)
+    {
+        $mode = $request->input('mode', 'list_ships');
+        $query = $this->buildVesselsQuery($request);
+
+        $count = (clone $query)->count();
+        if ($count > 5000) {
+            return response()->json([
+                'message' => 'Print and PDF export limit of 5,000 rows exceeded. Please narrow your date range or filters.',
+            ], 422);
+        }
+
+        $arrivals = $query->take(5000)->get();
+
+        $startDate = $request->input('date_from', $request->input('start_date'));
+        $endDate = $request->input('date_to', $request->input('end_date'));
+        $printedBy = auth()->user()?->name ?? 'System';
+
+        $pdf = Pdf::loadView('pdf.vessel-report', compact('arrivals', 'mode', 'startDate', 'endDate', 'printedBy'))
+            ->setPaper('a4', 'landscape');
+
+        $filename = $mode === 'list_ships_with_crew' ? 'vessel-crew-manifest-report.pdf' : 'vessel-report.pdf';
+
+        return $pdf->download($filename);
+    }
+
     public function buildVesselsQuery(Request $request): Builder
     {
         $mode = $request->input('mode', 'list_ships');
@@ -445,6 +471,29 @@ class ReportController extends Controller
                 }
             });
         }, 'vessel-crew-report.xlsx');
+    }
+
+    public function exportCrewPdf(Request $request)
+    {
+        $query = $this->buildCrewQuery($request);
+
+        $count = (clone $query)->count();
+        if ($count > 5000) {
+            return response()->json([
+                'message' => 'Print and PDF export limit of 5,000 rows exceeded. Please narrow your date range or filters.',
+            ], 422);
+        }
+
+        $placements = $query->take(5000)->get();
+
+        $startDate = $request->input('date_from', $request->input('start_date'));
+        $endDate = $request->input('date_to', $request->input('end_date'));
+        $printedBy = auth()->user()?->name ?? 'System';
+
+        $pdf = Pdf::loadView('pdf.crew-report', compact('placements', 'startDate', 'endDate', 'printedBy'))
+            ->setPaper('a4', 'landscape');
+
+        return $pdf->download('vessel-crew-report.pdf');
     }
 
     public function buildCrewQuery(Request $request): Builder

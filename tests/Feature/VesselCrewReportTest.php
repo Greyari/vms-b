@@ -8,6 +8,7 @@ use App\Models\Visitor;
 it('forbids unauthenticated user from accessing crew report and export', function () {
     $this->getJson('/api/reports/crew')->assertUnauthorized();
     $this->getJson('/api/reports/crew/export')->assertUnauthorized();
+    $this->getJson('/api/reports/crew/pdf')->assertUnauthorized();
 });
 
 it('forbids security role from accessing crew report and export', function () {
@@ -15,6 +16,7 @@ it('forbids security role from accessing crew report and export', function () {
 
     $this->getJson('/api/reports/crew')->assertForbidden();
     $this->getJson('/api/reports/crew/export')->assertForbidden();
+    $this->getJson('/api/reports/crew/pdf')->assertForbidden();
 });
 
 it('lists crew placements with vessel details, status, and supports filters', function () {
@@ -108,4 +110,30 @@ it('exports crew placements to excel stream download', function () {
     $response = $this->get('/api/reports/crew/export');
     $response->assertOk();
     $response->assertHeader('content-disposition', 'attachment; filename=vessel-crew-report.xlsx');
+});
+
+it('exports crew placements to landscape a4 pdf download', function () {
+    actingAsSupervisor();
+
+    $vessel = Location::factory()->create(['name' => 'TB. PDF CREW BOAT']);
+    $arrival = VesselArrival::factory()->create([
+        'location_id' => $vessel->id,
+        'vessel_name' => 'TB. PDF CREW BOAT',
+    ]);
+
+    $crew = Visitor::factory()->crew($vessel)->create([
+        'name' => 'PDF Crew Member',
+    ]);
+
+    VesselArrivalCrew::create([
+        'vessel_arrival_id' => $arrival->id,
+        'visitor_id' => $crew->id,
+        'status' => 'checked_in',
+        'checked_in_at' => now(),
+    ]);
+
+    $response = $this->get('/api/reports/crew/pdf?date_from=2026-10-01&date_to=2026-10-31');
+    $response->assertOk();
+    expect($response->headers->get('content-type'))->toBe('application/pdf');
+    expect($response->headers->get('content-disposition'))->toContain('vessel-crew-report.pdf');
 });
