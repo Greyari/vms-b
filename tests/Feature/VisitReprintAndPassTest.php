@@ -87,11 +87,11 @@ it('filters reprint visits by visitor name and normalized id_number', function (
     expect($responseId->json('data.0.id'))->toBe($visit1->id);
 });
 
-it('caps per_page pagination at 100 for reprint list', function () {
+it('caps per_page pagination at 1000 for reprint list', function () {
     createReprintVisit(['date' => '2026-09-24']);
 
-    $response = $this->getJson('/api/visits/reprint?date=2026-09-24&per_page=500')->assertOk();
-    expect($response->json('per_page'))->toBe(100);
+    $response = $this->getJson('/api/visits/reprint?date=2026-09-24&per_page=5000')->assertOk();
+    expect($response->json('per_page'))->toBe(1000);
 });
 
 it('includes printed_by user name in pass print response', function () {

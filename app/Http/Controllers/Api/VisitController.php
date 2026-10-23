@@ -717,8 +717,8 @@ class VisitController extends Controller
     public function reprint(Request $request)
     {
         $date = $request->query('date', now()->toDateString());
-        $perPage = (int) $request->input('per_page', 100);
-        $perPage = max(1, min($perPage, 100));
+        $requestedPerPage = (int) $request->input('per_page', 1000);
+        $perPage = max(1, min($requestedPerPage, 1000));
 
         $query = Visit::with(['visitor', 'staff', 'location', 'visitorCards', 'vehicleCard'])
             ->where('date', $date)
@@ -727,8 +727,16 @@ class VisitController extends Controller
         if ($request->filled('name')) {
             $term = trim((string) $request->query('name'));
             $escaped = '%'.strtolower(addcslashes($term, '%_\\')).'%';
-            $query->whereHas('visitor', function ($q) use ($escaped) {
-                $q->whereRaw('LOWER(name) LIKE ?', [$escaped]);
+            $query->where(function ($q) use ($escaped) {
+                $q->whereRaw('LOWER(COALESCE(ticket_number, \'\')) LIKE ?', [$escaped])
+                    ->orWhereRaw('LOWER(COALESCE(legacy_registration_no, \'\')) LIKE ?', [$escaped])
+                    ->orWhereRaw('LOWER(COALESCE(visitor_company, \'\')) LIKE ?', [$escaped])
+                    ->orWhereRaw('LOWER(COALESCE(location_name, \'\')) LIKE ?', [$escaped])
+                    ->orWhereRaw('LOWER(COALESCE(host_name, \'\')) LIKE ?', [$escaped])
+                    ->orWhereHas('visitor', function ($vQuery) use ($escaped) {
+                        $vQuery->whereRaw('LOWER(name) LIKE ?', [$escaped])
+                            ->orWhereRaw('LOWER(COALESCE(company, \'\')) LIKE ?', [$escaped]);
+                    });
             });
         }
 

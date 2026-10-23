@@ -129,4 +129,3 @@ it('allows fetching master data with per_page >= 1000 without 1000 cap', functio
     // When requested without 'page' and per_page >= 1000, per_page expands to at least 100000
     expect($response->json('per_page'))->toBeGreaterThanOrEqual(100000);
 });
-
