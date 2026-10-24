@@ -15,8 +15,10 @@ class Visit extends Model
 
     protected $fillable = [
         'visitor_id', 'staff_id', 'vehicle_card_id', 'location_id',
-        'purpose', 'date', 'time_in', 'time_out', 'checked_out_at', 'vehicle_no', 'ticket_number',
+        'purpose', 'date', 'time_in', 'time_out', 'checked_out_at',
+        'vehicle_no', 'plate_normalized', 'ticket_number',
         'location_name', 'host_name', 'visitor_company', 'legacy_registration_no',
+        'created_by', 'created_by_name', 'checked_out_by', 'checked_out_by_name',
     ];
 
     /**
@@ -27,6 +29,33 @@ class Visit extends Model
         return [
             'checked_out_at' => 'datetime',
         ];
+    }
+
+    public static function normalizePlate(?string $plate): ?string
+    {
+        if ($plate === null) {
+            return null;
+        }
+        $normalized = preg_replace('/[^A-Z0-9]/', '', strtoupper(trim($plate)));
+
+        return $normalized !== '' ? $normalized : null;
+    }
+
+    protected static function booted(): void
+    {
+        static::saving(function (Visit $visit): void {
+            $visit->plate_normalized = self::normalizePlate($visit->vehicle_no);
+        });
+    }
+
+    public function creator()
+    {
+        return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function checkedOutByUser()
+    {
+        return $this->belongsTo(User::class, 'checked_out_by');
     }
 
     /** Visits whose visitor has not checked out, however many days ago they came in. */

@@ -35,12 +35,19 @@ class VisitResource extends JsonResource
             'checked_out_at' => $this->checked_out_at?->format('Y-m-d H:i:s'),
             'purpose' => $this->purpose,
             'vehicle_no' => $this->vehicle_no,
+            'plate_normalized' => $this->plate_normalized ?? Visit::normalizePlate($this->vehicle_no),
+            'vehicle_card_id' => $this->vehicle_card_id,
             'visitor_name' => $this->visitor?->name,
             'visitor_company' => $this->visitor_company ?: $this->visitor?->company,
+            'staff_id' => $this->staff_id,
             'host_name' => $this->host_name ?: $this->staff?->name,
             'location_id' => $this->location_id,
             'location_name' => $this->location_name ?: $this->location?->name,
             'location_code' => $this->location?->code,
+            'created_by' => $this->created_by,
+            'created_by_name' => $this->created_by_name,
+            'checked_out_by' => $this->checked_out_by,
+            'checked_out_by_name' => $this->checked_out_by_name,
             'days_open' => $this->date === null ? 0 : (
                 $this->checked_out_at === null
                     ? (int) Carbon::parse($this->date)->diffInDays(now()->startOfDay())

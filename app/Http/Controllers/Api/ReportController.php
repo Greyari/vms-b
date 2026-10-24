@@ -182,10 +182,15 @@ class ReportController extends Controller
 
         // Location code or vehicle no
         if ($request->filled('location_code_or_vehicle_no')) {
-            $term = '%'.strtolower(addcslashes(trim((string) $request->input('location_code_or_vehicle_no')), '%_\\')).'%';
-            $query->where(function ($q) use ($term) {
+            $rawVal = trim((string) $request->input('location_code_or_vehicle_no'));
+            $term = '%'.strtolower(addcslashes($rawVal, '%_\\')).'%';
+            $normPlate = Visit::normalizePlate($rawVal);
+            $query->where(function ($q) use ($term, $normPlate) {
                 $q->whereRaw('LOWER(COALESCE(vehicle_no, \'\')) LIKE ?', [$term])
                     ->orWhereHas('location', fn ($lq) => $lq->whereRaw('LOWER(COALESCE(code, \'\')) LIKE ?', [$term]));
+                if ($normPlate !== null) {
+                    $q->orWhere('plate_normalized', 'LIKE', '%'.$normPlate.'%');
+                }
             });
         }
 

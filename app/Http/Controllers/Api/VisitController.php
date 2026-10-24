@@ -98,6 +98,163 @@ class VisitController extends Controller
         return response()->json(VisitorSummaryResource::collection($visitors)->resolve());
     }
 
+    public function index(Request $request)
+    {
+        $query = Visit::with(['visitor', 'staff', 'location', 'visitorCards', 'vehicleCard']);
+
+        if ($request->filled('date_from')) {
+            $query->where('date', '>=', $request->query('date_from'));
+        }
+
+        if ($request->filled('date_to')) {
+            $query->where('date', '<=', $request->query('date_to'));
+        }
+
+        if ($request->filled('start_date') && $request->filled('end_date')) {
+            $query->whereBetween('date', [$request->query('start_date'), $request->query('end_date')]);
+        }
+
+        if ($request->filled('location_id')) {
+            $query->where('location_id', $request->query('location_id'));
+        } elseif ($request->filled('location')) {
+            $locTerm = trim((string) $request->query('location'));
+            $escapedLoc = '%'.strtolower(addcslashes($locTerm, '%_\\')).'%';
+            $query->where(function ($q) use ($locTerm, $escapedLoc) {
+                if (preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i', $locTerm)) {
+                    $q->where('location_id', $locTerm);
+                } else {
+                    $q->whereRaw('LOWER(COALESCE(location_name, \'\')) LIKE ?', [$escapedLoc])
+                        ->orWhereHas('location', function ($lQuery) use ($escapedLoc) {
+                            $lQuery->whereRaw('LOWER(name) LIKE ?', [$escapedLoc])
+                                ->orWhereRaw('LOWER(COALESCE(code, \'\')) LIKE ?', [$escapedLoc]);
+                        });
+                }
+            });
+        }
+
+        if ($request->filled('visitor_type')) {
+            $visitorType = trim((string) $request->query('visitor_type'));
+            $query->whereHas('visitor', function ($q) use ($visitorType) {
+                $q->where('visitor_type', $visitorType);
+            });
+        }
+
+        if ($request->filled('plate')) {
+            $plateTerm = trim((string) $request->query('plate'));
+            $normalizedPlate = Visit::normalizePlate($plateTerm);
+            $escapedPlate = '%'.strtolower(addcslashes($plateTerm, '%_\\')).'%';
+            $query->where(function ($q) use ($normalizedPlate, $escapedPlate) {
+                $q->whereRaw('LOWER(COALESCE(vehicle_no, \'\')) LIKE ?', [$escapedPlate]);
+                if ($normalizedPlate !== null) {
+                    $escapedNorm = '%'.addcslashes($normalizedPlate, '%_\\').'%';
+                    $q->orWhere('plate_normalized', 'like', $escapedNorm);
+                }
+            });
+        }
+
+        $searchTerm = trim((string) ($request->query('search', $request->query('q', ''))));
+        if ($searchTerm !== '') {
+            $escaped = '%'.strtolower(addcslashes($searchTerm, '%_\\')).'%';
+            $normalizedPlate = Visit::normalizePlate($searchTerm);
+            $normalizedId = IdentityNumber::normalize($searchTerm);
+
+            $query->where(function ($q) use ($escaped, $normalizedPlate, $normalizedId) {
+                $q->whereRaw('LOWER(COALESCE(ticket_number, \'\')) LIKE ?', [$escaped])
+                    ->orWhereRaw('LOWER(COALESCE(legacy_registration_no, \'\')) LIKE ?', [$escaped])
+                    ->orWhereRaw('LOWER(COALESCE(visitor_company, \'\')) LIKE ?', [$escaped])
+                    ->orWhereRaw('LOWER(COALESCE(purpose, \'\')) LIKE ?', [$escaped])
+                    ->orWhereRaw('LOWER(COALESCE(host_name, \'\')) LIKE ?', [$escaped])
+                    ->orWhereRaw('LOWER(COALESCE(location_name, \'\')) LIKE ?', [$escaped])
+                    ->orWhereRaw('LOWER(COALESCE(vehicle_no, \'\')) LIKE ?', [$escaped])
+                    ->orWhereRaw('LOWER(COALESCE(created_by_name, \'\')) LIKE ?', [$escaped]);
+
+                if ($normalizedPlate !== null) {
+                    $escapedNormPlate = '%'.addcslashes($normalizedPlate, '%_\\').'%';
+                    $q->orWhere('plate_normalized', 'like', $escapedNormPlate);
+                }
+
+                $q->orWhereHas('visitor', function ($vQuery) use ($escaped, $normalizedId) {
+                    $vQuery->whereRaw('LOWER(name) LIKE ?', [$escaped])
+                        ->orWhereRaw('LOWER(COALESCE(company, \'\')) LIKE ?', [$escaped])
+                        ->orWhereRaw('LOWER(id_number) LIKE ?', [$escaped]);
+                    if ($normalizedId !== '') {
+                        $vQuery->orWhere('id_number', 'like', '%'.addcslashes($normalizedId, '%_\\').'%');
+                    }
+                })
+                    ->orWhereHas('visitorCards', function ($vcQuery) use ($escaped) {
+                        $vcQuery->whereRaw('LOWER(card_no) LIKE ?', [$escaped]);
+                    })
+                    ->orWhereHas('vehicleCard', function ($vehQuery) use ($escaped) {
+                        $vehQuery->whereRaw('LOWER(card_no) LIKE ?', [$escaped]);
+                    })
+                    ->orWhereHas('staff', function ($sQuery) use ($escaped) {
+                        $sQuery->whereRaw('LOWER(name) LIKE ?', [$escaped]);
+                    })
+                    ->orWhereHas('location', function ($lQuery) use ($escaped) {
+                        $lQuery->whereRaw('LOWER(name) LIKE ?', [$escaped])
+                            ->orWhereRaw('LOWER(COALESCE(code, \'\')) LIKE ?', [$escaped]);
+                    });
+            });
+        }
+
+        $activeCount = (clone $query)->whereNull('checked_out_at')->count();
+        $completedCount = (clone $query)->whereNotNull('checked_out_at')->count();
+        $allCount = $activeCount + $completedCount;
+
+        $status = strtolower((string) $request->query('status', 'active'));
+        if ($status === 'active') {
+            $query->whereNull('checked_out_at');
+        } elseif ($status === 'completed' || $status === 'checked_out') {
+            $query->whereNotNull('checked_out_at');
+        }
+
+        $sortBy = (string) $request->query('sort_by', 'created_at');
+        $sortDir = strtolower((string) $request->query('sort_dir', 'desc')) === 'asc' ? 'asc' : 'desc';
+
+        $allowedSortColumns = [
+            'created_at',
+            'date',
+            'time_in',
+            'checked_out_at',
+            'vehicle_no',
+            'purpose',
+            'location_name',
+            'host_name',
+            'visitor_company',
+            'ticket_number',
+            'created_by_name',
+        ];
+
+        if ($sortBy === 'visitor_name') {
+            $query->orderBy(
+                Visitor::select('name')
+                    ->whereColumn('visitors.id', 'visits.visitor_id')
+                    ->limit(1),
+                $sortDir
+            );
+        } elseif (in_array($sortBy, $allowedSortColumns, true)) {
+            $query->orderBy($sortBy, $sortDir);
+            if ($sortBy === 'date') {
+                $query->orderBy('time_in', $sortDir);
+            }
+        } else {
+            $query->orderBy('created_at', 'desc');
+        }
+
+        $perPage = (int) $request->query('per_page', 25);
+        $perPage = max(1, min($perPage, 1000));
+
+        $paginator = $query->paginate($perPage)->through(fn (Visit $visit): array => (new VisitResource($visit))->resolve());
+        $payload = $paginator->toArray();
+        $payload['counts'] = [
+            'active' => $activeCount,
+            'completed' => $completedCount,
+            'all' => $allCount,
+        ];
+
+        return response()->json($payload);
+    }
+
     public function activeVisits(Request $request)
     {
         $query = Visit::with(['visitor', 'staff', 'location', 'visitorCards', 'vehicleCard'])
@@ -149,6 +306,18 @@ class VisitController extends Controller
                     ->orWhereHas('visitor', function ($vQuery) use ($escaped) {
                         $vQuery->whereRaw('LOWER(COALESCE(company, \'\')) LIKE ?', [$escaped]);
                     });
+            });
+        }
+
+        if ($request->filled('plate') || $request->filled('vehicle_no')) {
+            $plateTerm = trim((string) ($request->query('plate') ?? $request->query('vehicle_no')));
+            $normalizedPlate = Visit::normalizePlate($plateTerm);
+            $escapedPlate = '%'.strtolower(addcslashes($plateTerm, '%_\\')).'%';
+            $query->where(function ($q) use ($normalizedPlate, $escapedPlate) {
+                $q->whereRaw('LOWER(COALESCE(vehicle_no, \'\')) LIKE ?', [$escapedPlate]);
+                if ($normalizedPlate !== null) {
+                    $q->orWhere('plate_normalized', 'like', '%'.addcslashes($normalizedPlate, '%_\\').'%');
+                }
             });
         }
 
@@ -370,11 +539,15 @@ class VisitController extends Controller
                     }
 
                     // Close all open visits for this visitor and release cards
-                    $openVisits = Visit::where('visitor_id', $visitor->id)->open()->get();
+                    $openVisits = Visit::where('visitor_id', $visitor->id)->open()->lockForUpdate()->get();
+                    $currentUser = $request->user();
+                    $currentUserName = $currentUser?->name ?? $currentUser?->username;
                     foreach ($openVisits as $openVisit) {
                         $openVisit->update([
                             'checked_out_at' => $now,
                             'time_out' => $now->toTimeString(),
+                            'checked_out_by' => $currentUser?->id,
+                            'checked_out_by_name' => $currentUserName,
                         ]);
 
                         $cardIds = $openVisit->visitorCards()->pluck('visitor_cards.id');
@@ -390,9 +563,9 @@ class VisitController extends Controller
 
                 $cardIds = array_values(array_filter($validated['card_ids'] ?? []));
 
-                // Verify visitor cards are available
+                // Verify visitor cards are available with row-level lock
                 if (! empty($cardIds)) {
-                    $visitorCards = VisitorCard::whereIn('id', $cardIds)->get();
+                    $visitorCards = VisitorCard::whereIn('id', $cardIds)->lockForUpdate()->get();
                     if ($visitorCards->contains('status', 'in_use')) {
                         throw new HttpResponseException(
                             response()->json(['message' => 'One or more selected Visitor Cards are in use'], 422)
@@ -400,10 +573,10 @@ class VisitController extends Controller
                     }
                 }
 
-                // Verify vehicle card is available
+                // Verify vehicle card is available with row-level lock
                 $vehicleCard = null;
                 if (! empty($validated['vehicle_card_id'])) {
-                    $vehicleCard = VehicleCard::find($validated['vehicle_card_id']);
+                    $vehicleCard = VehicleCard::where('id', $validated['vehicle_card_id'])->lockForUpdate()->first();
                     if ($vehicleCard && $vehicleCard->status === 'in_use') {
                         throw new HttpResponseException(
                             response()->json(['message' => 'Selected Vehicle Card is in use'], 422)
@@ -414,6 +587,7 @@ class VisitController extends Controller
                 // YY/MM/NNNNN, counted per month. The lock is already held,
                 // and taking it again inside next() is a no-op.
                 $ticketNumber = TicketNumber::next($now);
+                $creator = $request->user();
 
                 $visit = Visit::create([
                     'visitor_id' => $visitor->id,
@@ -428,6 +602,8 @@ class VisitController extends Controller
                     'time_in' => $now->toTimeString(),
                     'vehicle_no' => $validated['vehicle_no'] ?? null,
                     'ticket_number' => $ticketNumber,
+                    'created_by' => $creator?->id,
+                    'created_by_name' => $creator?->name ?? $creator?->username,
                 ]);
 
                 // Sync multi-cards
@@ -578,12 +754,32 @@ class VisitController extends Controller
 
     public function update(Request $request, string $id)
     {
-        $visit = Visit::findOrFail($id);
+        $visit = Visit::with('visitor')->findOrFail($id);
 
         if ($visit->checked_out_at !== null) {
             return response()->json([
                 'message' => 'Cannot update a visit that has already been checked out',
+                'error_code' => 'visit_already_checked_out',
             ], 422);
+        }
+
+        $visitor = $visit->visitor;
+        if ($visitor) {
+            $activeBlacklist = Blacklist::where('is_active', true)
+                ->where(function ($q) use ($visitor) {
+                    $q->where('visitor_id', $visitor->id)
+                        ->orWhere('id_number', $visitor->id_number);
+                })
+                ->latest('blacklisted_at')
+                ->first();
+
+            if ($visitor->is_blacklisted || $activeBlacklist !== null) {
+                return response()->json([
+                    'message' => 'This visitor is blacklisted and their visit cannot be modified.',
+                    'error_code' => 'visitor_blacklisted',
+                    'reason' => $activeBlacklist?->offences ?? $visitor->blacklist_reason ?? $visitor->offences,
+                ], 422);
+            }
         }
 
         $validated = $request->validate([
@@ -599,8 +795,16 @@ class VisitController extends Controller
         ]);
 
         try {
-            DB::transaction(function () use ($visit, $validated) {
+            DB::transaction(function () use ($id, &$visit, $validated) {
                 SequenceLock::acquire('ticket_number');
+
+                $visit = Visit::with(['visitor', 'visitorCards'])->where('id', $id)->lockForUpdate()->firstOrFail();
+                if ($visit->checked_out_at !== null) {
+                    throw new HttpResponseException(response()->json([
+                        'message' => 'Cannot update a visit that has already been checked out',
+                        'error_code' => 'visit_already_checked_out',
+                    ], 422));
+                }
 
                 // Location update
                 if (array_key_exists('location_id', $validated)) {
@@ -640,22 +844,30 @@ class VisitController extends Controller
                     }
                 }
 
+                $oldCardNos = null;
+                $newCardNos = null;
+
                 // Visitor Cards update
                 if (array_key_exists('card_ids', $validated)) {
                     $newCardIds = collect($validated['card_ids'] ?? [])->filter()->unique()->values()->all();
                     $currentCardIds = $visit->visitorCards()->pluck('visitor_cards.id')->all();
 
-                    $cardsToRelease = array_diff($currentCardIds, $newCardIds);
-                    $cardsToAdd = array_diff($newCardIds, $currentCardIds);
+                    $cardsToRelease = array_values(array_diff($currentCardIds, $newCardIds));
+                    $cardsToAdd = array_values(array_diff($newCardIds, $currentCardIds));
+
+                    if (! empty($cardsToRelease) || ! empty($cardsToAdd)) {
+                        $oldCardNos = VisitorCard::whereIn('id', $currentCardIds)->orderBy('card_no')->pluck('card_no')->all();
+                    }
 
                     // Release removed cards first
                     if (! empty($cardsToRelease)) {
+                        VisitorCard::whereIn('id', $cardsToRelease)->lockForUpdate()->get();
                         VisitorCard::whereIn('id', $cardsToRelease)->update(['status' => 'available']);
                     }
 
-                    // Verify new cards to add are available
+                    // Verify new cards to add are available with row-level lock
                     if (! empty($cardsToAdd)) {
-                        $newCards = VisitorCard::whereIn('id', $cardsToAdd)->get();
+                        $newCards = VisitorCard::whereIn('id', $cardsToAdd)->lockForUpdate()->get();
                         if ($newCards->contains('status', 'in_use')) {
                             throw new HttpResponseException(
                                 response()->json(['message' => 'One or more selected Visitor Cards are in use'], 422)
@@ -665,6 +877,10 @@ class VisitController extends Controller
                     }
 
                     $visit->visitorCards()->sync($newCardIds);
+
+                    if ($oldCardNos !== null) {
+                        $newCardNos = VisitorCard::whereIn('id', $newCardIds)->orderBy('card_no')->pluck('card_no')->all();
+                    }
                 }
 
                 // Vehicle Card update
@@ -675,12 +891,13 @@ class VisitController extends Controller
                     if ($newVehicleCardId !== $currentVehicleCardId) {
                         // Release old vehicle card if set
                         if ($currentVehicleCardId) {
+                            VehicleCard::where('id', $currentVehicleCardId)->lockForUpdate()->first();
                             VehicleCard::where('id', $currentVehicleCardId)->update(['status' => 'available']);
                         }
 
                         // Claim new vehicle card if set
                         if ($newVehicleCardId) {
-                            $newVehicleCard = VehicleCard::find($newVehicleCardId);
+                            $newVehicleCard = VehicleCard::where('id', $newVehicleCardId)->lockForUpdate()->first();
                             if ($newVehicleCard && $newVehicleCard->status === 'in_use') {
                                 throw new HttpResponseException(
                                     response()->json(['message' => 'Selected Vehicle Card is in use'], 422)
@@ -693,7 +910,17 @@ class VisitController extends Controller
                     }
                 }
 
+                $hadModelChanges = $visit->isDirty();
                 $visit->save();
+
+                if ($oldCardNos !== null && $oldCardNos !== $newCardNos) {
+                    ActivityLogger::log(
+                        action: $hadModelChanges ? 'cards_updated' : 'updated',
+                        subject: $visit,
+                        old: ['visitor_cards' => $oldCardNos],
+                        new: ['visitor_cards' => $newCardNos],
+                    );
+                }
             });
         } catch (HttpResponseException $e) {
             return $e->getResponse();
@@ -727,16 +954,21 @@ class VisitController extends Controller
         if ($request->filled('name')) {
             $term = trim((string) $request->query('name'));
             $escaped = '%'.strtolower(addcslashes($term, '%_\\')).'%';
-            $query->where(function ($q) use ($escaped) {
+            $normalizedPlate = Visit::normalizePlate($term);
+            $query->where(function ($q) use ($escaped, $normalizedPlate) {
                 $q->whereRaw('LOWER(COALESCE(ticket_number, \'\')) LIKE ?', [$escaped])
                     ->orWhereRaw('LOWER(COALESCE(legacy_registration_no, \'\')) LIKE ?', [$escaped])
                     ->orWhereRaw('LOWER(COALESCE(visitor_company, \'\')) LIKE ?', [$escaped])
                     ->orWhereRaw('LOWER(COALESCE(location_name, \'\')) LIKE ?', [$escaped])
                     ->orWhereRaw('LOWER(COALESCE(host_name, \'\')) LIKE ?', [$escaped])
+                    ->orWhereRaw('LOWER(COALESCE(vehicle_no, \'\')) LIKE ?', [$escaped])
                     ->orWhereHas('visitor', function ($vQuery) use ($escaped) {
                         $vQuery->whereRaw('LOWER(name) LIKE ?', [$escaped])
                             ->orWhereRaw('LOWER(COALESCE(company, \'\')) LIKE ?', [$escaped]);
                     });
+                if ($normalizedPlate !== null) {
+                    $q->orWhere('plate_normalized', 'like', '%'.addcslashes($normalizedPlate, '%_\\').'%');
+                }
             });
         }
 
@@ -758,13 +990,27 @@ class VisitController extends Controller
     {
         $visit = Visit::with(['visitor', 'staff', 'location', 'visitorCards', 'vehicleCard'])->findOrFail($id);
 
+        $printedBy = $request->user()?->name ?? $request->user()?->username;
+
+        ActivityLogger::log(
+            action: 'reprinted',
+            subject: $visit,
+            old: null,
+            new: [
+                'ticket_number' => $visit->ticket_number,
+                'printed_by' => $printedBy,
+                'visit_status' => $visit->checked_out_at ? 'completed' : 'active',
+            ],
+        );
+
         $data = (new VisitResource($visit))->resolve();
-        $data['printed_by'] = $request->user()?->name ?? $request->user()?->username;
+        $data['printed_by'] = $printedBy;
+        $data['is_completed'] = $visit->checked_out_at !== null;
 
         return response()->json($data);
     }
 
-    public function checkout($id)
+    public function checkout(Request $request, $id)
     {
         $visit = Visit::findOrFail($id);
 
@@ -773,30 +1019,40 @@ class VisitController extends Controller
         }
 
         try {
-            DB::beginTransaction();
+            DB::transaction(function () use ($request, $id, &$visit) {
+                $visit = Visit::with('visitorCards')->where('id', $id)->lockForUpdate()->firstOrFail();
 
-            // checked_out_at carries the date (multi-day visits); time_out stays
-            // for readers that still expect a clock time.
-            $checkedOutAt = now();
-            $visit->update([
-                'checked_out_at' => $checkedOutAt,
-                'time_out' => $checkedOutAt->toTimeString(),
-            ]);
+                if ($visit->checked_out_at !== null) {
+                    throw new HttpResponseException(
+                        response()->json(['message' => 'Visitor already checked out'], 422)
+                    );
+                }
 
-            // Revert visitor cards status
-            $cardIds = $visit->visitorCards->pluck('id')->toArray();
-            if (! empty($cardIds)) {
-                VisitorCard::whereIn('id', $cardIds)->update(['status' => 'available']);
-            }
+                // checked_out_at carries the date (multi-day visits); time_out stays
+                // for readers that still expect a clock time.
+                $checkedOutAt = now();
+                $officer = $request->user();
+                $visit->update([
+                    'checked_out_at' => $checkedOutAt,
+                    'time_out' => $checkedOutAt->toTimeString(),
+                    'checked_out_by' => $officer?->id,
+                    'checked_out_by_name' => $officer?->name ?? $officer?->username,
+                ]);
 
-            // Revert vehicle card status
-            if ($visit->vehicle_card_id) {
-                VehicleCard::where('id', $visit->vehicle_card_id)->update(['status' => 'available']);
-            }
+                // Revert visitor cards status
+                $cardIds = $visit->visitorCards->pluck('id')->toArray();
+                if (! empty($cardIds)) {
+                    VisitorCard::whereIn('id', $cardIds)->update(['status' => 'available']);
+                }
 
-            DB::commit();
+                // Revert vehicle card status
+                if ($visit->vehicle_card_id) {
+                    VehicleCard::where('id', $visit->vehicle_card_id)->update(['status' => 'available']);
+                }
+            });
+        } catch (HttpResponseException $e) {
+            return $e->getResponse();
         } catch (\Throwable $e) {
-            DB::rollBack();
             report($e);
 
             return response()->json([
@@ -810,6 +1066,85 @@ class VisitController extends Controller
         return response()->json([
             'message' => 'Checkout successful',
             'visit' => (new VisitResource($visit))->resolve(request()),
+        ]);
+    }
+
+    public function bulkCheckout(Request $request)
+    {
+        $validated = $request->validate([
+            'visit_ids' => 'required|array|min:1|max:500',
+            'visit_ids.*' => 'bail|required|uuid|exists:visits,id',
+        ]);
+
+        $visitIds = array_values(array_unique($validated['visit_ids']));
+        $checkedOutCount = 0;
+        $skippedCount = 0;
+        $checkedOutIds = [];
+
+        try {
+            DB::transaction(function () use ($request, $visitIds, &$checkedOutCount, &$skippedCount, &$checkedOutIds) {
+                $visits = Visit::with('visitorCards')
+                    ->whereIn('id', $visitIds)
+                    ->lockForUpdate()
+                    ->get();
+
+                $checkedOutAt = now();
+                $officer = $request->user();
+                $officerId = $officer?->id;
+                $officerName = $officer?->name ?? $officer?->username;
+
+                $visitorCardIdsToRelease = [];
+                $vehicleCardIdsToRelease = [];
+
+                foreach ($visits as $visit) {
+                    if ($visit->checked_out_at !== null) {
+                        $skippedCount++;
+
+                        continue;
+                    }
+
+                    $visit->update([
+                        'checked_out_at' => $checkedOutAt,
+                        'time_out' => $checkedOutAt->toTimeString(),
+                        'checked_out_by' => $officerId,
+                        'checked_out_by_name' => $officerName,
+                    ]);
+
+                    foreach ($visit->visitorCards as $card) {
+                        $visitorCardIdsToRelease[] = $card->id;
+                    }
+                    if ($visit->vehicle_card_id) {
+                        $vehicleCardIdsToRelease[] = $visit->vehicle_card_id;
+                    }
+
+                    $checkedOutCount++;
+                    $checkedOutIds[] = $visit->id;
+                }
+
+                if (! empty($visitorCardIdsToRelease)) {
+                    VisitorCard::whereIn('id', array_values(array_unique($visitorCardIdsToRelease)))
+                        ->update(['status' => 'available']);
+                }
+
+                if (! empty($vehicleCardIdsToRelease)) {
+                    VehicleCard::whereIn('id', array_values(array_unique($vehicleCardIdsToRelease)))
+                        ->update(['status' => 'available']);
+                }
+            });
+        } catch (\Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'message' => 'Bulk checkout failed',
+                'error' => 'An unexpected error stopped the bulk checkout from being completed.',
+            ], 500);
+        }
+
+        return response()->json([
+            'message' => 'Bulk checkout completed successfully',
+            'checked_out_count' => $checkedOutCount,
+            'skipped_count' => $skippedCount,
+            'checked_out_ids' => $checkedOutIds,
         ]);
     }
 

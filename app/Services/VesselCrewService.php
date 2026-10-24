@@ -226,7 +226,7 @@ class VesselCrewService
                 'source' => 'manual',
                 'performed_by' => $user?->id,
                 'performed_by_name' => $user?->name ?? $user?->username ?? 'System',
-                'notes' => 'Diaktifkan kembali (Reactivate)'.($notes ? ": {$notes}" : ''),
+                'notes' => 'Check-In Kembali'.($notes ? ": {$notes}" : ''),
                 'logged_at' => $now,
             ]);
 

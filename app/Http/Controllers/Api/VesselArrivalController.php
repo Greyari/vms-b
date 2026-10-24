@@ -77,7 +77,6 @@ class VesselArrivalController extends Controller
             ]);
         }
 
-        $showCompleted = $request->boolean('show_completed', false);
         $term = '%'.strtolower(addcslashes($q, '%_\\')).'%';
 
         // 1. Search Vessels (Kedatangan Kapal)
@@ -163,10 +162,6 @@ class VesselArrivalController extends Controller
                     ->orWhereRaw('LOWER(COALESCE(visitors.occupation, \'\')) LIKE ?', [$term])
                     ->orWhereRaw('LOWER(COALESCE(vessel_arrivals.vessel_name, \'\')) LIKE ?', [$term]);
             });
-
-        if (! $showCompleted) {
-            $crewQuery->whereIn('vessel_arrival_crew.status', ['expected', 'checked_in']);
-        }
 
         // Order active status first (expected / checked_in), then checked_out, then by name
         $crewResults = $crewQuery

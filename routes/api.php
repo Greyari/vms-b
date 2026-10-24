@@ -55,6 +55,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::middleware('permission:view_visits')->group(function () {
         Route::get('/dashboard', [DashboardController::class, 'index']);
         Route::get('/visitors/check-ktp/{ktp}', [VisitController::class, 'checkKtp']);
+        Route::get('/visits', [VisitController::class, 'index']);
         Route::get('/visits/search', [VisitController::class, 'searchVisitor']);
         Route::get('/visits/active', [VisitController::class, 'activeVisits']);
         Route::get('/visits/reprint', [VisitController::class, 'reprint']);
@@ -95,6 +96,7 @@ Route::middleware('auth:sanctum')->group(function () {
     });
     Route::get('/sync/status', [SyncController::class, 'status']);
     Route::put('/visits/{id}', [VisitController::class, 'update'])->middleware('permission:update_visits')->whereUuid('id');
+    Route::post('/visits/bulk-checkout', [VisitController::class, 'bulkCheckout'])->middleware('permission:checkout_visits');
     Route::post('/visits/{id}/checkout', [VisitController::class, 'checkout'])->middleware('permission:checkout_visits');
     Route::delete('/visits/{id}', [VisitController::class, 'destroy'])->middleware('permission:delete_visits');
 

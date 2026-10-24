@@ -80,7 +80,7 @@ class ActivityLogger
      */
     protected static function labelFor(Model $subject): ?string
     {
-        foreach (['name', 'full_name', 'plate_number', 'card_number', 'title', 'email'] as $field) {
+        foreach (['name', 'full_name', 'ticket_number', 'legacy_registration_no', 'plate_number', 'card_number', 'card_no', 'title', 'email'] as $field) {
             if (! empty($subject->{$field})) {
                 return (string) $subject->{$field};
             }

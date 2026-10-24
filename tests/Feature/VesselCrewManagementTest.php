@@ -57,21 +57,19 @@ test('unified search finds vessels and active crew members with masked id', func
     $resVessel->assertOk()
         ->assertJsonCount(1, 'vessels')
         ->assertJsonPath('vessels.0.vessel_name', 'BARGE MAJU 01')
-        ->assertJsonPath('vessels.0.active_crew_count', 1);
+        ->assertJsonPath('vessels.0.active_crew_count', 1)
+        ->assertJsonPath('vessels.0.completed_crew_count', 0);
 
-    // 2. Search by crew name (default: show_completed = 0)
+    // 2. Search by crew name always includes both checked_in and checked_out crew (active sorted first)
     $resCrew = $this->actingAs($this->admin)->getJson('/api/vessel-arrivals/search?q=JOKO');
     $resCrew->assertOk()
-        ->assertJsonCount(1, 'crew')
+        ->assertJsonCount(2, 'crew')
         ->assertJsonPath('crew.0.name', 'JOKO TINGKIR')
         ->assertJsonPath('crew.0.vessel_name', 'BARGE MAJU 01')
         ->assertJsonPath('crew.0.status', 'checked_in')
-        ->assertJsonPath('crew.0.id_number_masked', '2171********0004');
-
-    // 3. Search with show_completed = 1 includes checked_out crew
-    $resCrewAll = $this->actingAs($this->admin)->getJson('/api/vessel-arrivals/search?q=JOKO&show_completed=1');
-    $resCrewAll->assertOk()
-        ->assertJsonCount(2, 'crew');
+        ->assertJsonPath('crew.0.id_number_masked', '2171********0004')
+        ->assertJsonPath('crew.1.name', 'JOKO ANWAR')
+        ->assertJsonPath('crew.1.status', 'checked_out');
 });
 
 test('it prevents crew from having multiple active placements on different vessels', function () {

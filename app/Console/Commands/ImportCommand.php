@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Enums\ImportSource;
 use App\Models\ActivityLog;
+use App\Models\VehicleCard;
 use App\Models\VisitorCard;
 use App\Services\Import\ImportReport;
 use App\Services\Import\MappingManager;
@@ -112,6 +113,20 @@ class ImportCommand extends Command
                 VisitorCard::whereIn('id', $inUseCardIds)->update(['status' => 'in_use']);
             }
             VisitorCard::whereNotIn('id', $inUseCardIds)->update(['status' => 'available']);
+
+            $inUseVehicleCardIds = DB::table('visits')
+                ->whereNull('checked_out_at')
+                ->whereNotNull('vehicle_card_id')
+                ->distinct()
+                ->pluck('vehicle_card_id')
+                ->all();
+
+            if (! empty($inUseVehicleCardIds)) {
+                VehicleCard::whereIn('id', $inUseVehicleCardIds)->update(['status' => 'in_use']);
+            }
+            VehicleCard::whereNotIn('id', $inUseVehicleCardIds)
+                ->where('status', 'in_use')
+                ->update(['status' => 'available']);
 
             // Create single summary activity log
             ActivityLog::create([
