@@ -347,8 +347,14 @@ class ReportController extends Controller
         $query = VesselArrival::query();
 
         if ($mode === 'list_ships_with_crew') {
-            $query->with(['vessel', 'crew' => function ($q) use ($request) {
+            $crewStatus = $request->input('crew_status', 'active');
+            $query->with(['vessel', 'crew' => function ($q) use ($request, $crewStatus) {
                 $q->where('visitor_type', 'crew');
+                if ($crewStatus === 'active') {
+                    $q->wherePivotIn('status', ['expected', 'checked_in']);
+                } elseif ($crewStatus === 'completed' || $crewStatus === 'checked_out') {
+                    $q->wherePivot('status', 'checked_out');
+                }
                 if ($request->filled('crew_visitor_no_from')) {
                     $q->where('visitor_no', '>=', (int) $request->input('crew_visitor_no_from'));
                 }

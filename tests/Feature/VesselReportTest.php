@@ -202,3 +202,29 @@ it('exports vessels report to landscape a4 pdf download in list_ships_with_crew 
     expect($res->headers->get('content-type'))->toBe('application/pdf');
     expect($res->headers->get('content-disposition'))->toContain('vessel-crew-manifest-report.pdf');
 });
+
+it('only lists active/registered crew in list_ships_with_crew mode by default and excludes checked out crew', function () {
+    actingAsSupervisor();
+
+    $vessel = Location::factory()->create(['name' => 'MV. VOYAGE CREW TEST']);
+    $arrival = VesselArrival::factory()->create([
+        'location_id' => $vessel->id,
+        'vessel_name' => 'MV. VOYAGE CREW TEST',
+    ]);
+
+    $activeCrew = Visitor::factory()->crew($vessel)->create(['name' => 'Active Crew 1']);
+    $checkedOutCrew = Visitor::factory()->crew($vessel)->create(['name' => 'Checked Out Crew 2']);
+
+    $arrival->crew()->attach($activeCrew->id, ['status' => 'checked_in']);
+    $arrival->crew()->attach($checkedOutCrew->id, ['status' => 'checked_out']);
+
+    $res = $this->getJson('/api/reports/vessels?mode=list_ships_with_crew')->assertOk();
+    $row = collect($res->json('data'))->firstWhere('id', $arrival->id);
+    expect($row['crew'])->toHaveCount(1);
+    expect($row['crew'][0]['name'])->toBe('Active Crew 1');
+
+    // With crew_status=all, both are included
+    $resAll = $this->getJson('/api/reports/vessels?mode=list_ships_with_crew&crew_status=all')->assertOk();
+    $rowAll = collect($resAll->json('data'))->firstWhere('id', $arrival->id);
+    expect($rowAll['crew'])->toHaveCount(2);
+});

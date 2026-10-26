@@ -163,13 +163,17 @@ class VesselArrivalController extends Controller
                     ->orWhereRaw('LOWER(COALESCE(vessel_arrivals.vessel_name, \'\')) LIKE ?', [$term]);
             });
 
-        // Order active status first (expected / checked_in), then checked_out, then by name
+        // Order active status first (expected / checked_in), then newest check-in date, and deduplicate by visitor_id
+        // so a person only appears once with their current or latest placement.
         $crewResults = $crewQuery
             ->orderByRaw("CASE WHEN vessel_arrival_crew.status IN ('expected', 'checked_in') THEN 0 ELSE 1 END")
             ->orderBy('vessel_arrival_crew.checked_in_at', 'desc')
             ->orderBy('visitors.name', 'asc')
-            ->limit(30)
+            ->limit(100)
             ->get()
+            ->unique('visitor_id')
+            ->take(30)
+            ->values()
             ->map(function ($row) {
                 // Partially mask ID number for privacy (e.g. 217103******0004)
                 $rawId = (string) $row->id_number;
@@ -445,25 +449,33 @@ class VesselArrivalController extends Controller
 
             if (array_key_exists('crew_ids', $validated)) {
                 $newCrewList = array_values(array_unique(array_filter($validated['crew_ids'] ?? [])));
-                $arrival->crew()->sync($newCrewList);
+                $toRemove = array_diff($existingCrewIds, $newCrewList);
+                $toAdd = array_diff($newCrewList, $existingCrewIds);
+                $now = now();
+
+                if (! empty($toRemove)) {
+                    foreach ($toRemove as $crewId) {
+                        VesselArrivalCrewLog::create([
+                            'vessel_arrival_id' => $arrival->id,
+                            'visitor_id' => $crewId,
+                            'action' => 'check_out',
+                            'source' => 'vessel_signon',
+                            'performed_by' => $user?->id,
+                            'performed_by_name' => $user?->name ?? $user?->username,
+                            'notes' => 'Dilepas dari manifest kedatangan kapal',
+                            'logged_at' => $now,
+                        ]);
+                    }
+                    $arrival->crew()->detach($toRemove);
+                }
+
+                if (! empty($toAdd)) {
+                    $this->crewService->checkIn($arrival, $toAdd, null, 'Ditambahkan pada manifest kedatangan kapal', $user, true);
+                }
+
                 if (! empty($newCrewList)) {
                     Visitor::whereIn('id', $newCrewList)
                         ->update(['vessel_id' => $arrival->location_id]);
-                }
-
-                $toAdd = array_diff($newCrewList, $existingCrewIds);
-                $now = now();
-                foreach ($toAdd as $crewId) {
-                    VesselArrivalCrewLog::create([
-                        'vessel_arrival_id' => $arrival->id,
-                        'visitor_id' => $crewId,
-                        'action' => 'check_in',
-                        'source' => 'vessel_signon',
-                        'performed_by' => $user?->id,
-                        'performed_by_name' => $user?->name ?? $user?->username,
-                        'notes' => 'Ditambahkan pada manifest kedatangan kapal',
-                        'logged_at' => $now,
-                    ]);
                 }
             }
 
