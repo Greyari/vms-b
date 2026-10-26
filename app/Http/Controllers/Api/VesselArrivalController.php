@@ -10,9 +10,12 @@ use App\Models\VesselArrivalCrew;
 use App\Models\VesselArrivalCrewLog;
 use App\Models\Visitor;
 use App\Services\VesselCrewService;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Spatie\SimpleExcel\SimpleExcelWriter;
 
 class VesselArrivalController extends Controller
 {
@@ -414,6 +417,59 @@ class VesselArrivalController extends Controller
         }
 
         return response()->json($query->get());
+    }
+
+    public function exportCrewLogs(Request $request, string $id)
+    {
+        $arrival = VesselArrival::with('vessel')->findOrFail($id);
+
+        $query = VesselArrivalCrewLog::with(['visitor', 'visit'])
+            ->where('vessel_arrival_id', $arrival->id)
+            ->orderBy('logged_at', 'desc')
+            ->orderBy('created_at', 'desc');
+
+        if ($request->filled('visitor_id')) {
+            $query->where('visitor_id', $request->query('visitor_id'));
+        }
+
+        if ($request->filled('action') && in_array($request->query('action'), ['check_in', 'check_out'], true)) {
+            $query->where('action', $request->query('action'));
+        }
+
+        $cleanVessel = Str::slug($arrival->vessel_name ?: ($arrival->vessel?->name ?: 'kapal'));
+        $fileName = "log-kru-{$cleanVessel}-".now()->format('YmdHis').'.xlsx';
+
+        return response()->streamDownload(function () use ($query) {
+            $writer = SimpleExcelWriter::streamDownload('log-kru.xlsx');
+
+            $query->chunk(500, function ($logs) use ($writer) {
+                foreach ($logs as $log) {
+                    $visitor = $log->visitor;
+                    $actionLabel = match ($log->action) {
+                        'check_in' => 'Check-In',
+                        'check_out' => 'Check-Out',
+                        default => ucfirst((string) $log->action),
+                    };
+
+                    $writer->addRow([
+                        'Waktu Aktivitas' => $log->logged_at ? Carbon::parse($log->logged_at)->format('d/m/Y H:i') : '-',
+                        'Nama Kru' => $visitor?->name ?? '-',
+                        'No Kru' => $visitor?->visitor_no ?? '-',
+                        'Tipe ID' => strtoupper($visitor?->id_type ?? '-'),
+                        'Nomor ID' => $visitor?->id_number ?? '-',
+                        'Jabatan' => $visitor?->occupation ?? '-',
+                        'Kebangsaan' => $visitor?->nationality ?? '-',
+                        'Perusahaan / Agen' => $visitor?->company ?? '-',
+                        'Buku Pelaut' => $visitor?->seaman_book_no ?? '-',
+                        'No Sertifikat' => $visitor?->certificate_no ?: ($visitor?->certificate ?? '-'),
+                        'Aksi' => $actionLabel,
+                        'Sumber' => $log->source ?? '-',
+                        'Petugas' => $log->performed_by_name ?? '-',
+                        'Catatan' => $log->notes ?? '-',
+                    ]);
+                }
+            });
+        }, $fileName);
     }
 
     public function update(VesselArrivalRequest $request, string $id): JsonResponse

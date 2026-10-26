@@ -207,6 +207,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/vessel-arrivals', [VesselArrivalController::class, 'index']);
         Route::get('/vessel-arrivals/crew-candidates', [VesselArrivalController::class, 'crewCandidates']);
         Route::get('/vessel-arrivals/{id}/crew-logs', [VesselArrivalController::class, 'crewLogs'])->whereUuid('id');
+        Route::get('/vessel-arrivals/{id}/crew-logs/export', [VesselArrivalController::class, 'exportCrewLogs'])->whereUuid('id');
         Route::get('/vessel-arrivals/{id}', [VesselArrivalController::class, 'show'])->whereUuid('id');
     });
     Route::middleware('permission:manage_vessel_arrivals')->group(function () {

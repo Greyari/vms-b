@@ -3,6 +3,7 @@
 use App\Models\Location;
 use App\Models\Staff;
 use App\Models\VesselArrival;
+use App\Models\VesselArrivalCrewLog;
 use App\Models\Visitor;
 use App\Models\VisitorCard;
 
@@ -298,4 +299,26 @@ it('automatically assigns and checks in a crew visitor to the vessel arrival and
         ->and($logs[0]['action'])->toBe('check_in')
         ->and($logs[0]['source'])->toBe('visit_checkin')
         ->and($logs[0]['visit_id'])->toBe($visitId);
+});
+
+it('exports crew logs to an excel stream download', function () {
+    actingAsSupervisor();
+    $arrival = VesselArrival::factory()->create(['vessel_name' => 'MV EXPORT TEST']);
+    $crew = Visitor::factory()->crew()->create(['name' => 'Log Sailor']);
+
+    $arrival->crew()->attach($crew->id, ['status' => 'checked_in']);
+    VesselArrivalCrewLog::create([
+        'vessel_arrival_id' => $arrival->id,
+        'visitor_id' => $crew->id,
+        'action' => 'check_in',
+        'source' => 'manual',
+        'performed_by_name' => 'Supervisor User',
+        'notes' => 'Testing crew log export',
+        'logged_at' => now(),
+    ]);
+
+    $res = $this->get("/api/vessel-arrivals/{$arrival->id}/crew-logs/export")
+        ->assertOk();
+
+    expect($res->headers->get('content-disposition'))->toContain('log-kru-mv-export-test');
 });
