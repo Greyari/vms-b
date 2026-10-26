@@ -3,6 +3,7 @@
 use App\Models\Location;
 use App\Models\User;
 use App\Models\VesselArrival;
+use App\Models\VesselArrivalCrewLog;
 use App\Models\Visitor;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
@@ -116,13 +117,20 @@ test('it transfers a crew member from old vessel to new vessel in single transac
     ]);
     $resTransfer->assertOk();
 
-    // Verify placement in old arrival is checked_out
+    // Verify placement in old arrival is detached from vessel_arrival_crew so no duplicate placements exist
     $oldPivot = DB::table('vessel_arrival_crew')
         ->where('vessel_arrival_id', $arr1->id)
         ->where('visitor_id', $crew->id)
         ->first();
-    expect($oldPivot->status)->toBe('checked_out');
-    expect($oldPivot->checked_out_at)->not->toBeNull();
+    expect($oldPivot)->toBeNull();
+
+    // Verify transfer audit log exists on old arrival
+    $oldLog = VesselArrivalCrewLog::where('vessel_arrival_id', $arr1->id)
+        ->where('visitor_id', $crew->id)
+        ->latest('logged_at')
+        ->first();
+    expect($oldLog)->not->toBeNull()
+        ->and($oldLog->action)->toBe('check_out');
 
     // Verify placement in new arrival is checked_in
     $newPivot = DB::table('vessel_arrival_crew')

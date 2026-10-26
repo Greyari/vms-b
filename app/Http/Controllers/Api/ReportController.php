@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\VisitResource;
 use App\Models\VesselArrival;
 use App\Models\VesselArrivalCrew;
+use App\Models\VesselArrivalCrewLog;
 use App\Models\Visit;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
@@ -415,7 +416,10 @@ class ReportController extends Controller
 
     public function crew(Request $request): JsonResponse
     {
-        $query = $this->buildCrewQuery($request);
+        $mode = $request->input('mode', 'placements');
+        $query = ($mode === 'history' || $mode === 'logs')
+            ? $this->buildCrewLogsQuery($request)
+            : $this->buildCrewQuery($request);
 
         if ($request->boolean('print') || $request->input('limit') === 'print') {
             $count = (clone $query)->count();
@@ -435,6 +439,49 @@ class ReportController extends Controller
 
     public function exportCrew(Request $request)
     {
+        $mode = $request->input('mode', 'placements');
+
+        if ($mode === 'history' || $mode === 'logs') {
+            $query = $this->buildCrewLogsQuery($request);
+
+            return response()->streamDownload(function () use ($query) {
+                $writer = SimpleExcelWriter::streamDownload('vessel-crew-history-report.xlsx');
+
+                $query->chunk(500, function ($logs) use ($writer) {
+                    foreach ($logs as $log) {
+                        $crew = $log->visitor;
+                        $arrival = $log->vesselArrival;
+
+                        $actionLabel = match ($log->action) {
+                            'check_in' => 'Check-In',
+                            'check_out' => 'Check-Out',
+                            default => ucfirst((string) $log->action),
+                        };
+
+                        $writer->addRow([
+                            'Waktu Aktivitas' => $log->logged_at ? Carbon::parse($log->logged_at)->format('d/m/Y H:i') : '-',
+                            'No Kru' => $crew?->visitor_no ?? '-',
+                            'Nama Kru' => $crew?->name ?? '-',
+                            'Tipe ID' => strtoupper($crew?->id_type ?? '-'),
+                            'Nomor ID' => $crew?->id_number ?? '-',
+                            'Jenis Kelamin' => $crew?->gender ?? '-',
+                            'Kebangsaan' => $crew?->nationality ?? '-',
+                            'Perusahaan' => $crew?->company ?? '-',
+                            'Jabatan / Occupation' => $crew?->occupation ?? '-',
+                            'Buku Pelaut' => $crew?->seaman_book_no ?? '-',
+                            'No Sertifikat' => $crew?->certificate_no ?: ($crew?->certificate ?? '-'),
+                            'Nama Kapal Ditugaskan' => $arrival?->vessel_name ?? $arrival?->vessel?->name ?? '-',
+                            'Kode / IMO Kapal' => $arrival?->vessel?->code ?? '-',
+                            'Aksi / Status In-Out' => $actionLabel,
+                            'Sumber Aktivitas' => $log->source ?? '-',
+                            'Petugas' => $log->performed_by_name ?? '-',
+                            'Catatan' => $log->notes ?? '-',
+                        ]);
+                    }
+                });
+            }, 'vessel-crew-history-report.xlsx');
+        }
+
         $query = $this->buildCrewQuery($request);
 
         return response()->streamDownload(function () use ($query) {
@@ -486,7 +533,10 @@ class ReportController extends Controller
 
     public function exportCrewPdf(Request $request)
     {
-        $query = $this->buildCrewQuery($request);
+        $mode = $request->input('mode', 'placements');
+        $query = ($mode === 'history' || $mode === 'logs')
+            ? $this->buildCrewLogsQuery($request)
+            : $this->buildCrewQuery($request);
 
         $count = (clone $query)->count();
         if ($count > 5000) {
@@ -495,16 +545,18 @@ class ReportController extends Controller
             ], 422);
         }
 
-        $placements = $query->take(5000)->get();
+        $records = $query->take(5000)->get();
 
         $startDate = $request->input('date_from', $request->input('start_date'));
         $endDate = $request->input('date_to', $request->input('end_date'));
         $printedBy = auth()->user()?->name ?? 'System';
 
-        $pdf = Pdf::loadView('pdf.crew-report', compact('placements', 'startDate', 'endDate', 'printedBy'))
+        $pdf = Pdf::loadView('pdf.crew-report', compact('records', 'mode', 'startDate', 'endDate', 'printedBy'))
             ->setPaper('a4', 'landscape');
 
-        return $pdf->download('vessel-crew-report.pdf');
+        $filename = ($mode === 'history' || $mode === 'logs') ? 'vessel-crew-history-report.pdf' : 'vessel-crew-report.pdf';
+
+        return $pdf->download($filename);
     }
 
     public function buildCrewQuery(Request $request): Builder
@@ -575,6 +627,71 @@ class ReportController extends Controller
         // Ordering: active status first, then newest created_at
         $query->orderByRaw("CASE WHEN status = 'checked_in' THEN 1 WHEN status = 'expected' THEN 2 ELSE 3 END")
             ->orderBy('created_at', 'desc');
+
+        return $query;
+    }
+
+    public function buildCrewLogsQuery(Request $request): Builder
+    {
+        $query = VesselArrivalCrewLog::query()
+            ->with([
+                'vesselArrival.vessel',
+                'visitor',
+                'user',
+            ]);
+
+        // Search across crew name, id_number, seaman_book_no, certificate_no, company, or vessel_name
+        if ($request->filled('search')) {
+            $term = '%'.strtolower(addcslashes(trim((string) $request->input('search')), '%_\\')).'%';
+            $query->where(function ($q) use ($term) {
+                $q->whereHas('visitor', function ($vq) use ($term) {
+                    $vq->whereRaw('LOWER(name) LIKE ?', [$term])
+                        ->orWhereRaw('LOWER(id_number) LIKE ?', [$term])
+                        ->orWhereRaw('LOWER(COALESCE(seaman_book_no, \'\')) LIKE ?', [$term])
+                        ->orWhereRaw('LOWER(COALESCE(certificate_no, \'\')) LIKE ?', [$term])
+                        ->orWhereRaw('LOWER(COALESCE(company, \'\')) LIKE ?', [$term]);
+                })->orWhereHas('vesselArrival', function ($aq) use ($term) {
+                    $aq->whereRaw('LOWER(vessel_name) LIKE ?', [$term])
+                        ->orWhereRaw('LOWER(COALESCE(captain, \'\')) LIKE ?', [$term]);
+                });
+            });
+        }
+
+        // Vessel filter (name or arrival id)
+        if ($request->filled('vessel_name')) {
+            $term = '%'.strtolower(addcslashes(trim((string) $request->input('vessel_name')), '%_\\')).'%';
+            $query->whereHas('vesselArrival', fn ($aq) => $aq->whereRaw('LOWER(vessel_name) LIKE ?', [$term]));
+        }
+        if ($request->filled('vessel_arrival_id')) {
+            $query->where('vessel_arrival_id', $request->input('vessel_arrival_id'));
+        }
+
+        // Action filter: check_in, check_out, etc.
+        if ($request->filled('action') && $request->input('action') !== 'all') {
+            $query->where('action', $request->input('action'));
+        }
+
+        // Nationality
+        if ($request->filled('nationality')) {
+            $term = '%'.strtolower(addcslashes(trim((string) $request->input('nationality')), '%_\\')).'%';
+            $query->whereHas('visitor', fn ($vq) => $vq->whereRaw('LOWER(COALESCE(nationality, \'\')) LIKE ?', [$term]));
+        }
+
+        // Company
+        if ($request->filled('company')) {
+            $term = '%'.strtolower(addcslashes(trim((string) $request->input('company')), '%_\\')).'%';
+            $query->whereHas('visitor', fn ($vq) => $vq->whereRaw('LOWER(COALESCE(company, \'\')) LIKE ?', [$term]));
+        }
+
+        // Date range (logged_at)
+        if ($request->filled('date_from')) {
+            $query->whereDate('logged_at', '>=', $request->input('date_from'));
+        }
+        if ($request->filled('date_to')) {
+            $query->whereDate('logged_at', '<=', $request->input('date_to'));
+        }
+
+        $query->orderBy('logged_at', 'desc')->orderBy('id', 'desc');
 
         return $query;
     }

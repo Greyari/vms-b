@@ -322,3 +322,79 @@ it('exports crew logs to an excel stream download', function () {
 
     expect($res->headers->get('content-disposition'))->toContain('log-kru-mv-export-test');
 });
+
+it('blocks crew check-in if crew is already attached to another vessel arrival', function () {
+    actingAsSupervisor();
+    $arrivalA = VesselArrival::factory()->create(['vessel_name' => 'KAPAL A']);
+    $arrivalB = VesselArrival::factory()->create(['vessel_name' => 'KAPAL B']);
+    $crew = Visitor::factory()->crew()->create(['name' => 'Sailor Test']);
+
+    // Attached on Vessel A (even as checked_out)
+    $arrivalA->crew()->attach($crew->id, ['status' => 'checked_out']);
+
+    // Attempting check-in on Vessel B should fail validation
+    $res = $this->postJson("/api/vessel-arrivals/{$arrivalB->id}/crew/check-in", [
+        'visitor_ids' => [$crew->id],
+    ]);
+
+    $res->assertStatus(422);
+    $res->assertJsonValidationErrors(['conflict']);
+});
+
+it('can detach a crew member from a vessel arrival and record audit log', function () {
+    actingAsSupervisor();
+    $arrival = VesselArrival::factory()->create(['vessel_name' => 'KAPAL TEST']);
+    $crew = Visitor::factory()->crew()->create([
+        'name' => 'Sailor Detach',
+        'vessel_id' => $arrival->location_id,
+    ]);
+
+    $arrival->crew()->attach($crew->id, ['status' => 'checked_in']);
+
+    $res = $this->postJson("/api/vessel-arrivals/{$arrival->id}/crew/detach", [
+        'visitor_id' => $crew->id,
+        'notes' => 'Dilepas dari penugasan tugas',
+    ]);
+
+    $res->assertOk();
+    expect($res->json('id'))->toBe($arrival->id);
+
+    // Check pivot is detached
+    expect($arrival->fresh()->crew()->where('visitor_id', $crew->id)->exists())->toBeFalse();
+
+    // Check log recorded
+    $log = VesselArrivalCrewLog::where('vessel_arrival_id', $arrival->id)
+        ->where('visitor_id', $crew->id)
+        ->latest('logged_at')
+        ->first();
+
+    expect($log)->not->toBeNull()
+        ->and($log->action)->toBe('check_out')
+        ->and($log->notes)->toBe('Dilepas dari penugasan tugas');
+
+    // Check visitor vessel_id is cleared
+    expect($crew->fresh()->vessel_id)->toBeNull();
+});
+
+it('returns crew logs report when mode is history', function () {
+    actingAsSupervisor();
+    $arrival = VesselArrival::factory()->create(['vessel_name' => 'KAPAL HISTORY']);
+    $crew = Visitor::factory()->crew()->create(['name' => 'Sailor History']);
+
+    VesselArrivalCrewLog::create([
+        'vessel_arrival_id' => $arrival->id,
+        'visitor_id' => $crew->id,
+        'action' => 'check_in',
+        'source' => 'manual',
+        'performed_by_name' => 'Supervisor User',
+        'notes' => 'Testing history report',
+        'logged_at' => now(),
+    ]);
+
+    $res = $this->getJson('/api/reports/crew?mode=history')
+        ->assertOk();
+
+    expect($res->json('data'))->toHaveCount(1)
+        ->and($res->json('data.0.visitor.name'))->toBe('Sailor History')
+        ->and($res->json('data.0.action'))->toBe('check_in');
+});

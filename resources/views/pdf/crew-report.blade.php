@@ -44,7 +44,7 @@
 
     <div class="header">
         {{ mb_strtoupper(config('vms.branding.company_name') ?: 'Visitor Management System') }}<br>
-        VESSEL CREW REPORT (LAPORAN KRU KAPAL)<br>
+        {{ ($mode ?? 'placements') === 'history' ? 'VESSEL CREW ACTIVITY & HISTORY REPORT (LAPORAN RIWAYAT AKTIVITAS KRU)' : 'VESSEL CREW REPORT (LAPORAN PENEMPATAN KRU KAPAL)' }}<br>
         <span style="font-size: 10px; font-weight: normal;">
             PERIODE : 
             {{ !empty($startDate) ? \Carbon\Carbon::parse($startDate)->format('d/m/Y') : 'SEMUA' }} s/d 
@@ -52,6 +52,60 @@
         </span>
     </div>
 
+    @if(($mode ?? 'placements') === 'history')
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 20px;">NO</th>
+                <th>WAKTU AKTIVITAS</th>
+                <th>CREW NO</th>
+                <th>CREW NAME</th>
+                <th>ID NUMBER</th>
+                <th>GENDER</th>
+                <th>NATIONALITY</th>
+                <th>OCCUPATION</th>
+                <th>VESSEL NAME</th>
+                <th>AKSI / STATUS</th>
+                <th>PETUGAS</th>
+                <th>CATATAN</th>
+            </tr>
+        </thead>
+        <tbody>
+            @php $list = $records ?? $placements ?? collect(); @endphp
+            @foreach($list as $index => $log)
+            @php
+                $crew = $log->visitor;
+                $arrival = $log->vesselArrival;
+                $actionLabel = match ($log->action) {
+                    'check_in' => 'Check-In',
+                    'check_out' => 'Check-Out',
+                    default => ucfirst((string) $log->action),
+                };
+            @endphp
+            <tr>
+                <td style="text-align: center;">{{ $index + 1 }}</td>
+                <td style="text-align: center;">{{ $log->logged_at ? \Carbon\Carbon::parse($log->logged_at)->format('d/m/Y H:i') : '-' }}</td>
+                <td style="text-align: center;">{{ $crew?->visitor_no ?? '-' }}</td>
+                <td>{{ $crew?->name ?? '-' }}</td>
+                <td>{{ $crew?->id_number ?? '-' }}</td>
+                <td style="text-align: center;">{{ $crew?->gender ?? '-' }}</td>
+                <td>{{ $crew?->nationality ?? '-' }}</td>
+                <td>{{ $crew?->occupation ?? '-' }}</td>
+                <td>{{ $arrival?->vessel_name ?? $arrival?->vessel?->name ?? '-' }}</td>
+                <td style="text-align: center;">{{ $actionLabel }}</td>
+                <td>{{ $log->performed_by_name ?? '-' }}</td>
+                <td>{{ $log->notes ?? '-' }}</td>
+            </tr>
+            @endforeach
+
+            @if($list->isEmpty())
+            <tr>
+                <td colspan="12" style="text-align: center; padding: 10px;">No crew activity history available for this period.</td>
+            </tr>
+            @endif
+        </tbody>
+    </table>
+    @else
     <table>
         <thead>
             <tr>
@@ -74,7 +128,8 @@
             </tr>
         </thead>
         <tbody>
-            @foreach($placements as $index => $placement)
+            @php $list = $records ?? $placements ?? collect(); @endphp
+            @foreach($list as $index => $placement)
             @php
                 $crew = $placement->visitor;
                 $arrival = $placement->vesselArrival;
@@ -105,13 +160,14 @@
             </tr>
             @endforeach
 
-            @if($placements->isEmpty())
+            @if($list->isEmpty())
             <tr>
                 <td colspan="16" style="text-align: center; padding: 10px;">No crew placement records available for this period.</td>
             </tr>
             @endif
         </tbody>
     </table>
+    @endif
 
     <div class="footer">
         Printed by: {{ $printedBy ?? 'System' }} | Date: {{ now()->format('d/m/Y H:i:s') }}

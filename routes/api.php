@@ -215,6 +215,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/vessel-arrivals/{id}', [VesselArrivalController::class, 'update'])->whereUuid('id');
         Route::post('/vessel-arrivals/{id}/crew/check-in', [VesselArrivalController::class, 'checkInCrew'])->whereUuid('id');
         Route::post('/vessel-arrivals/{id}/crew/check-out', [VesselArrivalController::class, 'checkOutCrew'])->whereUuid('id');
+        Route::post('/vessel-arrivals/{id}/crew/detach', [VesselArrivalController::class, 'detachCrew'])->whereUuid('id');
         Route::post('/vessel-arrivals/{id}/crew/reactivate', [VesselArrivalController::class, 'reactivateCrew'])->whereUuid('id');
         Route::post('/vessel-arrivals/{id}/crew/transfer', [VesselArrivalController::class, 'transferCrew'])->whereUuid('id');
         Route::delete('/vessel-arrivals/{id}', [VesselArrivalController::class, 'destroy'])->whereUuid('id');

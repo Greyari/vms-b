@@ -81,14 +81,6 @@ class ReconcileCrewPlacementsCommand extends Command
             $this->line("  -> Keeping active/primary on: <info>{$primary->vessel_name}</info> [{$primary->status}]");
 
             foreach ($obsolete as $obs) {
-                // Only clean up if the obsolete placement is checked_out or superseded
-                if (in_array($obs->status, ['expected', 'checked_in'], true) && in_array($primary->status, ['expected', 'checked_in'], true)) {
-                    // Both are active: cannot happen with unique constraint, but if present, skip or close
-                    $this->warn("  -> Skipping ambiguous active duplicate on {$obs->vessel_name}");
-
-                    continue;
-                }
-
                 $this->line("  -> Removing obsolete placement from: <fg=red>{$obs->vessel_name}</fg=red> [{$obs->status}]");
 
                 if (! $dryRun) {
@@ -105,7 +97,7 @@ class ReconcileCrewPlacementsCommand extends Command
                             'source' => 'manual',
                             'performed_by' => null,
                             'performed_by_name' => 'System Reconciler',
-                            'notes' => 'Arsip historis sebelum mutasi ke '.$primary->vessel_name,
+                            'notes' => 'Arsip historis sebelum penugasan ke '.$primary->vessel_name,
                             'logged_at' => $obs->checked_out_at ?? $obs->updated_at ?? now(),
                         ]);
                         $logsEnsuredCount++;

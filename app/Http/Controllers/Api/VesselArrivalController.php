@@ -650,6 +650,28 @@ class VesselArrivalController extends Controller
         return response()->json($arrival);
     }
 
+    public function detachCrew(Request $request, string $id): JsonResponse
+    {
+        $arrival = VesselArrival::findOrFail($id);
+        $user = $request->user();
+
+        $validated = $request->validate([
+            'visitor_id' => ['required', 'uuid', 'exists:visitors,id'],
+            'notes' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        $this->crewService->detach(
+            $arrival,
+            $validated['visitor_id'],
+            $validated['notes'] ?? null,
+            $user
+        );
+
+        $arrival->load(['vessel', 'crew', 'crewLogs.visitor']);
+
+        return response()->json($arrival);
+    }
+
     public function transferCrew(Request $request, string $id): JsonResponse
     {
         $targetArrival = VesselArrival::findOrFail($id);

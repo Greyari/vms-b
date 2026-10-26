@@ -40,10 +40,9 @@ class VesselCrewService
             ]);
         }
 
-        // 2. Active placement conflict check on other vessels
+        // 2. Active placement conflict check on other vessels (Strict 1 crew = 1 vessel placement)
         $conflicts = VesselArrivalCrew::whereIn('visitor_id', $visitorIds)
             ->where('vessel_arrival_id', '!=', $arrival->id)
-            ->whereIn('status', ['expected', 'checked_in'])
             ->with(['vesselArrival', 'visitor'])
             ->get();
 
@@ -62,8 +61,14 @@ class VesselCrewService
                 $conflict = $conflicts->first();
                 $visitorName = $conflict->visitor?->name ?? 'Kru';
                 $vesselName = $conflict->vesselArrival?->vessel_name ?? 'kapal lain';
+                $statusLabel = match ($conflict->status) {
+                    'checked_in' => 'aktif (Check-In)',
+                    'checked_out' => 'terdaftar (Check-Out)',
+                    'expected' => 'terdaftar (Belum Check-In)',
+                    default => 'terdaftar',
+                };
                 throw ValidationException::withMessages([
-                    'conflict' => ["Kru {$visitorName} masih aktif di kapal {$vesselName}. Silakan lakukan pindah kapal."],
+                    'conflict' => ["Kru {$visitorName} masih {$statusLabel} di kapal {$vesselName}. Silakan lepas/hapus kru dari {$vesselName} terlebih dahulu."],
                     'conflict_visitor_id' => [$conflict->visitor_id],
                     'conflict_vessel_name' => [$vesselName],
                     'conflict_arrival_id' => [$conflict->vessel_arrival_id],
@@ -195,17 +200,22 @@ class VesselCrewService
             ]);
         }
 
-        // Check if currently active on another vessel arrival
+        // Check if currently active on another vessel arrival (Strict 1 crew = 1 vessel placement)
         $conflict = VesselArrivalCrew::where('visitor_id', $visitorId)
             ->where('vessel_arrival_id', '!=', $arrival->id)
-            ->whereIn('status', ['expected', 'checked_in'])
             ->with(['vesselArrival'])
             ->first();
 
         if ($conflict) {
             $otherVessel = $conflict->vesselArrival?->vessel_name ?? 'kapal lain';
+            $statusLabel = match ($conflict->status) {
+                'checked_in' => 'aktif (Check-In)',
+                'checked_out' => 'terdaftar (Check-Out)',
+                'expected' => 'terdaftar (Belum Check-In)',
+                default => 'terdaftar',
+            };
             throw ValidationException::withMessages([
-                'conflict' => ["Kru {$visitor->name} saat ini aktif di kapal {$otherVessel}. Lakukan pindah kapal bila ingin memindahkan."],
+                'conflict' => ["Kru {$visitor->name} masih {$statusLabel} di kapal {$otherVessel}. Silakan lepas/hapus kru dari {$otherVessel} terlebih dahulu."],
             ]);
         }
 
@@ -244,6 +254,49 @@ class VesselCrewService
     }
 
     /**
+     * Detach a crew member from a vessel arrival (release crew from vessel).
+     *
+     * @return array<string, mixed>
+     */
+    public function detach(
+        VesselArrival $arrival,
+        string $visitorId,
+        ?string $notes = null,
+        ?User $user = null
+    ): array {
+        $visitor = Visitor::findOrFail($visitorId);
+
+        DB::transaction(function () use ($arrival, $visitor, $notes, $user) {
+            $now = now();
+            VesselArrivalCrewLog::create([
+                'vessel_arrival_id' => $arrival->id,
+                'visitor_id' => $visitor->id,
+                'action' => 'check_out',
+                'source' => 'manual',
+                'performed_by' => $user?->id,
+                'performed_by_name' => $user?->name ?? $user?->username ?? 'System',
+                'notes' => $notes ?? 'Dilepas dari penugasan kapal',
+                'logged_at' => $now,
+            ]);
+
+            $arrival->crew()->detach($visitor->id);
+
+            if ($visitor->vessel_id === $arrival->location_id) {
+                $visitor->update(['vessel_id' => null]);
+            }
+        });
+
+        ActivityLogger::logEvent('vessel_crew_detach', [
+            'vessel_arrival_id' => $arrival->id,
+            'vessel_name' => $arrival->vessel_name,
+            'visitor_id' => $visitorId,
+            'notes' => $notes,
+        ]);
+
+        return ['success' => true];
+    }
+
+    /**
      * Transfer a crew member from one vessel arrival to another in a single transaction.
      *
      * @return array<string, mixed>
@@ -265,8 +318,7 @@ class VesselCrewService
         $targetArrival = VesselArrival::findOrFail($targetArrivalId);
 
         // Find active placement
-        $activePlacementQuery = VesselArrivalCrew::where('visitor_id', $visitorId)
-            ->whereIn('status', ['expected', 'checked_in']);
+        $activePlacementQuery = VesselArrivalCrew::where('visitor_id', $visitorId);
 
         if ($sourceArrivalId) {
             $activePlacementQuery->where('vessel_arrival_id', $sourceArrivalId);
@@ -281,14 +333,9 @@ class VesselCrewService
         $now = now();
 
         DB::transaction(function () use ($visitor, $targetArrival, $activePlacement, $now, $notes, $user) {
-            // 1. Check-out from source arrival if currently active
+            // 1. Check-out and detach from source arrival if currently placed
             if ($activePlacement) {
                 $sourceArrival = $activePlacement->vesselArrival;
-                $activePlacement->update([
-                    'status' => 'checked_out',
-                    'checked_out_at' => $now,
-                    'notes' => 'Pindah ke kapal '.$targetArrival->vessel_name,
-                ]);
 
                 VesselArrivalCrewLog::create([
                     'vessel_arrival_id' => $activePlacement->vessel_arrival_id,
@@ -300,6 +347,8 @@ class VesselCrewService
                     'notes' => 'Pindah ke kapal '.$targetArrival->vessel_name.($notes ? ": {$notes}" : ''),
                     'logged_at' => $now,
                 ]);
+
+                $activePlacement->delete();
             }
 
             // 2. Attach or update on target arrival
