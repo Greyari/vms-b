@@ -32,6 +32,7 @@ class VisitResource extends JsonResource
             // Local wall-clock time, like date and time_in. Eloquent's default
             // serialisation would send UTC and move an early-morning checkout
             // to the previous day.
+            'checked_in_at' => $this->date && $this->time_in ? Carbon::parse($this->date.' '.$this->time_in)->format('Y-m-d H:i:s') : $this->created_at?->format('Y-m-d H:i:s'),
             'checked_out_at' => $this->checked_out_at?->format('Y-m-d H:i:s'),
             'purpose' => $this->purpose,
             'vehicle_no' => $this->vehicle_no,
@@ -41,6 +42,8 @@ class VisitResource extends JsonResource
             'visitor_company' => $this->visitor_company ?: $this->visitor?->company,
             'staff_id' => $this->staff_id,
             'host_name' => $this->host_name ?: $this->staff?->name,
+            'host_occupation' => $this->staff?->occupation,
+            'host_department' => $this->staff?->department,
             'location_id' => $this->location_id,
             'location_name' => $this->location_name ?: $this->location?->name,
             'location_code' => $this->location?->code,
@@ -68,6 +71,8 @@ class VisitResource extends JsonResource
                 'id' => $this->staff->id,
                 'staff_id' => $this->staff->staff_id,
                 'name' => $this->staff->name,
+                'department' => $this->staff->department,
+                'occupation' => $this->staff->occupation,
                 'company' => $this->staff->company,
                 'address' => $this->staff->address,
                 'gender' => $this->staff->gender,

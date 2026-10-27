@@ -84,12 +84,21 @@
                 <td>{{ $visit->visitor_company ?: ($visit->visitor?->company ?? '-') }}</td>
                 <td>{{ $visit->location_name ?: ($visit->location?->name ?? '-') }}</td>
                 <td>{{ $visit->location?->code ?? '-' }}</td>
-                <td>{{ $visit->host_name ?: ($visit->staff?->name ?? '-') }}</td>
+                <td>
+                    {{ $visit->host_name ?: ($visit->staff?->name ?? '-') }}
+                    @if($visit->staff?->occupation)
+                        <br><span style="color: #555; font-size: 8px;">({{ $visit->staff->occupation }})</span>
+                    @endif
+                </td>
                 <td>{{ $visit->purpose ?? '-' }}</td>
                 <td>{{ $visit->visitorCards->pluck('card_no')->join(', ') ?: ($visit->visitorCard?->card_no ?? '-') }}</td>
                 <td style="text-align: center;">{{ $visit->date ? \Carbon\Carbon::parse($visit->date)->format('d/m/Y') : '-' }}</td>
-                <td style="text-align: center;">{{ $visit->time_in ? \Carbon\Carbon::parse($visit->time_in)->format('H:i') : '-' }}</td>
-                <td style="text-align: center;">{{ $visit->time_out ? \Carbon\Carbon::parse($visit->time_out)->format('H:i') : '-' }}</td>
+                <td style="text-align: center; font-size: 8px;">
+                    {{ $visit->date && $visit->time_in ? \Carbon\Carbon::parse($visit->date.' '.$visit->time_in)->format('d/m/Y H:i:s') : ($visit->time_in ? \Carbon\Carbon::parse($visit->time_in)->format('H:i:s') : '-') }}
+                </td>
+                <td style="text-align: center; font-size: 8px;">
+                    {{ $visit->checked_out_at ? \Carbon\Carbon::parse($visit->checked_out_at)->format('d/m/Y H:i:s') : ($visit->time_out ? \Carbon\Carbon::parse(($visit->date ?? now()->toDateString()).' '.$visit->time_out)->format('d/m/Y H:i:s') : 'OPEN') }}
+                </td>
                 <td style="text-align: center;">{{ $visit->days_open }}</td>
                 <td>{{ $visit->vehicle_no ?? '-' }}</td>
             </tr>

@@ -58,17 +58,29 @@ class ReportController extends Controller
                         $cards = $visit->visitorCard->card_no;
                     }
 
+                    $checkInFull = $visit->date && $visit->time_in
+                        ? Carbon::parse($visit->date.' '.$visit->time_in)->format('d/m/Y H:i:s')
+                        : ($visit->created_at ? $visit->created_at->format('d/m/Y H:i:s') : '-');
+
+                    $checkOutFull = $visit->checked_out_at
+                        ? Carbon::parse($visit->checked_out_at)->format('d/m/Y H:i:s')
+                        : ($visit->time_out ? Carbon::parse(($visit->date ?? now()->toDateString()).' '.$visit->time_out)->format('d/m/Y H:i:s') : 'OPEN');
+
                     $writer->addRow([
                         'Ticket No' => $visit->ticket_number ?? $visit->legacy_registration_no ?? '-',
-                        'Date' => $visit->date,
-                        'Time In' => $visit->time_in ? Carbon::parse($visit->time_in)->format('H:i') : '-',
-                        'Time Out' => $visit->time_out ? Carbon::parse($visit->time_out)->format('H:i') : '-',
+                        'Date' => $visit->date ? Carbon::parse($visit->date)->format('d/m/Y') : '-',
+                        'Check-In' => $checkInFull,
+                        'Check-Out' => $checkOutFull,
+                        'Time In' => $visit->time_in ? Carbon::parse($visit->time_in)->format('H:i:s') : '-',
+                        'Time Out' => $visit->time_out ? Carbon::parse($visit->time_out)->format('H:i:s') : '-',
                         'Days Open' => $visit->days_open,
                         'ID Type' => strtoupper($visit->visitor?->id_type ?? '-'),
                         'ID Number' => $visit->visitor?->id_number ?? '-',
                         'Visitor Name' => $visit->visitor?->name ?? '-',
                         'Company' => $visit->visitor_company ?: ($visit->visitor?->company ?? '-'),
                         'Staff To Visit' => $visit->host_name ?: ($visit->staff?->name ?? '-'),
+                        'Staff Occupation' => $visit->staff?->occupation ?? '-',
+                        'Staff Department' => $visit->staff?->department ?? '-',
                         'Location' => $visit->location_name ?: ($visit->location?->name ?? '-'),
                         'Location Code' => $visit->location?->code ?? '-',
                         'Purpose' => $visit->purpose ?? '-',
