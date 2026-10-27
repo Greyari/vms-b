@@ -11,7 +11,7 @@ uses(RefreshDatabase::class);
 
 beforeEach(function () {
     $this->admin = User::factory()->create();
-    $this->admin->givePermissionTo(['view_vessel_arrivals', 'manage_vessel_arrivals']);
+    $this->admin->givePermissionTo(['view_vessel_arrivals', 'manage_vessel_arrivals', 'view_visitors']);
 });
 
 test('unified search finds vessels and active crew members with masked id', function () {
@@ -209,4 +209,67 @@ test('it provides placement detail and log timeline for person panel', function 
         ->assertJsonPath('current_placement.vessel_name', 'KAPAL PANEL')
         ->assertJsonPath('current_placement.status', 'checked_in')
         ->assertJsonCount(1, 'logs');
+});
+
+test('it blocks check-in, reactivate, and transfer if vessel has already departed', function () {
+    $loc = Location::factory()->create(['name' => 'KAPAL BERANGKAT']);
+    $arr = VesselArrival::factory()->create([
+        'location_id' => $loc->id,
+        'vessel_name' => 'KAPAL BERANGKAT',
+        'sign_out_date' => now()->toDateString(),
+    ]);
+
+    $crew = Visitor::factory()->create(['visitor_type' => 'crew', 'name' => 'KRU TERLALU TELAT']);
+
+    // Check-in on departed vessel
+    $this->actingAs($this->admin)->postJson("/api/vessel-arrivals/{$arr->id}/crew/check-in", [
+        'visitor_id' => $crew->id,
+    ])->assertStatus(422)
+        ->assertJsonValidationErrors(['vessel']);
+
+    // Reactivate on departed vessel
+    $arr->crew()->attach($crew->id, [
+        'status' => 'checked_out',
+        'checked_in_at' => now()->subDays(2),
+        'checked_out_at' => now()->subDay(),
+    ]);
+
+    $this->actingAs($this->admin)->postJson("/api/vessel-arrivals/{$arr->id}/crew/reactivate", [
+        'visitor_id' => $crew->id,
+    ])->assertStatus(422)
+        ->assertJsonValidationErrors(['vessel']);
+
+    // Transfer to departed vessel ($arr has sign_out_date)
+    $activeLoc = Location::factory()->create(['name' => 'KAPAL AKTIF']);
+    $activeArr = VesselArrival::factory()->create(['location_id' => $activeLoc->id, 'vessel_name' => 'KAPAL AKTIF']);
+    $otherCrew = Visitor::factory()->create(['visitor_type' => 'crew', 'name' => 'KRU AKTIF']);
+    $activeArr->crew()->attach($otherCrew->id, ['status' => 'checked_in', 'checked_in_at' => now()]);
+
+    $this->actingAs($this->admin)->postJson("/api/vessel-arrivals/{$arr->id}/crew/transfer", [
+        'visitor_id' => $otherCrew->id,
+    ])->assertStatus(422)
+        ->assertJsonValidationErrors(['target_arrival']);
+});
+
+test('it returns current_placement and crew_logs in visitor show for crew visitor', function () {
+    $loc = Location::factory()->create(['name' => 'KAPAL SHOW']);
+    $arr = VesselArrival::factory()->create(['location_id' => $loc->id, 'vessel_name' => 'KAPAL SHOW']);
+    $crew = Visitor::factory()->create([
+        'visitor_type' => 'crew',
+        'name' => 'KRU SHOW',
+    ]);
+
+    $this->actingAs($this->admin)->postJson("/api/vessel-arrivals/{$arr->id}/crew/check-in", [
+        'visitor_id' => $crew->id,
+        'notes' => 'Penugasan masuk',
+    ])->assertOk();
+
+    $res = $this->actingAs($this->admin)->getJson("/api/visitors/{$crew->id}");
+    $res->assertOk()
+        ->assertJsonPath('visitor.name', 'KRU SHOW')
+        ->assertJsonPath('visitor.current_placement.vessel_name', 'KAPAL SHOW')
+        ->assertJsonPath('visitor.current_placement.status', 'checked_in')
+        ->assertJsonCount(1, 'visitor.crew_logs')
+        ->assertJsonPath('visitor.crew_logs.0.action', 'check_in')
+        ->assertJsonPath('visitor.crew_logs.0.vessel_name', 'KAPAL SHOW');
 });

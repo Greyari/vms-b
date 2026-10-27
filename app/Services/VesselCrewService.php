@@ -32,6 +32,13 @@ class VesselCrewService
             return ['count' => 0];
         }
 
+        // 0. Vessel departure check (cannot check in crew to a departed vessel)
+        if ($arrival->sign_out_date !== null) {
+            throw ValidationException::withMessages([
+                'vessel' => ["Kapal {$arrival->vessel_name} sudah berangkat (Sign-Out pada {$arrival->sign_out_date}). Tidak dapat melakukan check-in kru pada kedatangan kapal yang sudah keluar galangan."],
+            ]);
+        }
+
         // 1. Blacklist check
         $blacklisted = Visitor::whereIn('id', $visitorIds)->where('is_blacklisted', true)->first();
         if ($blacklisted) {
@@ -194,6 +201,12 @@ class VesselCrewService
     ): array {
         $visitor = Visitor::findOrFail($visitorId);
 
+        if ($arrival->sign_out_date !== null) {
+            throw ValidationException::withMessages([
+                'vessel' => ["Kapal {$arrival->vessel_name} sudah berangkat (Sign-Out pada {$arrival->sign_out_date}). Tidak dapat mengaktifkan kembali kru pada kedatangan kapal yang sudah keluar galangan."],
+            ]);
+        }
+
         if ($visitor->is_blacklisted) {
             throw ValidationException::withMessages([
                 'crew' => ["Kru {$visitor->name} berstatus blacklist dan tidak dapat diaktifkan kembali."],
@@ -316,6 +329,12 @@ class VesselCrewService
         }
 
         $targetArrival = VesselArrival::findOrFail($targetArrivalId);
+
+        if ($targetArrival->sign_out_date !== null) {
+            throw ValidationException::withMessages([
+                'target_arrival' => ["Kapal tujuan {$targetArrival->vessel_name} sudah berangkat (Sign-Out pada {$targetArrival->sign_out_date}). Tidak dapat memindahkan kru ke kapal yang sudah keluar galangan."],
+            ]);
+        }
 
         // Find active placement
         $activePlacementQuery = VesselArrivalCrew::where('visitor_id', $visitorId);

@@ -84,8 +84,6 @@ Route::middleware('auth:sanctum')->group(function () {
     // --- Visits (write) -------------------------------------------------
     Route::post('/visits', [VisitController::class, 'store'])->middleware('permission:create_visits');
 
-    // Hybrid multi-yard (spec §6.2, §6.3, §8.3): scanned pre-registrations, the global blacklist
-    // mirror and its outbox, and the sync indicator.
     Route::get('/pre-registrations/{token}', [PreRegistrationController::class, 'show'])->middleware('permission:create_visits');
     Route::get('/global-blacklists', [GlobalBlacklistController::class, 'index'])->middleware('permission:view_visitors');
     Route::middleware('permission:manage_blacklist')->group(function () {

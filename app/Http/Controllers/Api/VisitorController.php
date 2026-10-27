@@ -9,6 +9,8 @@ use App\Http\Resources\VisitorProfileResource;
 use App\Http\Resources\VisitorSummaryResource;
 use App\Http\Resources\VisitResource;
 use App\Models\Blacklist;
+use App\Models\VesselArrivalCrew;
+use App\Models\VesselArrivalCrewLog;
 use App\Models\Visit;
 use App\Models\Visitor;
 use App\Services\BlacklistService;
@@ -112,8 +114,52 @@ class VisitorController extends Controller
                 ->limit(50),
         ])->withCount('visits')->findOrFail($id);
 
+        $currentPlacement = null;
+        $crewLogs = [];
+
+        if ($visitor->visitor_type === VisitorType::Crew || $visitor->visitor_type?->value === 'crew') {
+            $placement = VesselArrivalCrew::with(['vesselArrival.vessel'])
+                ->where('visitor_id', $visitor->id)
+                ->whereHas('vesselArrival', fn ($q) => $q->whereNull('sign_out_date'))
+                ->whereIn('status', ['checked_in', 'expected'])
+                ->latest('checked_in_at')
+                ->first();
+
+            if ($placement) {
+                $currentPlacement = [
+                    'id' => $placement->id,
+                    'vessel_arrival_id' => $placement->vessel_arrival_id,
+                    'vessel_name' => $placement->vesselArrival?->vessel_name,
+                    'vessel_code' => $placement->vesselArrival?->vessel?->code,
+                    'status' => $placement->status,
+                    'checked_in_at' => $placement->checked_in_at?->format('Y-m-d H:i:s'),
+                    'sign_in_date' => $placement->vesselArrival?->sign_in_date?->format('Y-m-d'),
+                ];
+            }
+
+            $crewLogs = VesselArrivalCrewLog::with('vesselArrival')
+                ->where('visitor_id', $visitor->id)
+                ->orderByDesc('logged_at')
+                ->limit(50)
+                ->get()
+                ->map(fn (VesselArrivalCrewLog $log) => [
+                    'id' => $log->id,
+                    'action' => $log->action,
+                    'source' => $log->source,
+                    'performed_by_name' => $log->performed_by_name,
+                    'notes' => $log->notes,
+                    'logged_at' => $log->logged_at?->format('Y-m-d H:i:s'),
+                    'vessel_name' => $log->vesselArrival?->vessel_name,
+                    'vessel_arrival_id' => $log->vessel_arrival_id,
+                ]);
+        }
+
+        $visitorData = (new VisitorProfileResource($visitor))->resolve();
+        $visitorData['current_placement'] = $currentPlacement;
+        $visitorData['crew_logs'] = $crewLogs;
+
         return response()->json([
-            'visitor' => (new VisitorProfileResource($visitor))->resolve(),
+            'visitor' => $visitorData,
             'summary' => [
                 'visits_count' => $visitor->visits_count,
                 'first_visit_date' => $visitor->visits()->min('date'),
