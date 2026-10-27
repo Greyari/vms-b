@@ -55,7 +55,7 @@ class CheckoutHistoricalVisitsCommand extends Command
         // Strict Safety Guard: Never allow checking out today or future visits with this command
         if ($beforeDate->greaterThanOrEqualTo($today)) {
             $this->error("Safety Error: Cannot checkout visits from today ({$today->toDateString()}) or future dates.");
-            $this->error("This command is strictly for historical / imported open visits. Visits from today must be checked out through the standard counter UI.");
+            $this->error('This command is strictly for historical / imported open visits. Visits from today must be checked out through the standard counter UI.');
 
             return 1;
         }
