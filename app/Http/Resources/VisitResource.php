@@ -48,7 +48,7 @@ class VisitResource extends JsonResource
             'location_name' => $this->location_name ?: $this->location?->name,
             'location_code' => $this->location?->code,
             'created_by' => $this->created_by,
-            'created_by_name' => $this->created_by_name,
+            'created_by_name' => $this->created_by_name ?: ($this->creator?->name ?? $this->creator?->username),
             'checked_out_by' => $this->checked_out_by,
             'checked_out_by_name' => $this->checked_out_by_name,
             'days_open' => $this->date === null ? 0 : (

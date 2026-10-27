@@ -988,7 +988,7 @@ class VisitController extends Controller
 
     public function print(Request $request, $id)
     {
-        $visit = Visit::with(['visitor', 'staff', 'location', 'visitorCards', 'vehicleCard'])->findOrFail($id);
+        $visit = Visit::with(['visitor', 'staff', 'location', 'visitorCards', 'vehicleCard', 'creator'])->findOrFail($id);
 
         $printedBy = $request->user()?->name ?? $request->user()?->username;
 
