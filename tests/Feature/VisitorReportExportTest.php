@@ -97,7 +97,7 @@ it('returns unpaginated collection when print=true under limit', function () {
     expect($data[0])->toHaveKeys(['id', 'date', 'ticket_number', 'visitor_name', 'location_name']);
 });
 
-it('enforces 5000 rows print limit on reports/visits with 422 when print=true', function () {
+it('allows printing beyond 5000 rows without 422 limit', function () {
     actingAsSupervisor();
     $visitor = Visitor::factory()->create();
 
@@ -120,32 +120,6 @@ it('enforces 5000 rows print limit on reports/visits with 422 when print=true', 
     }
 
     $res = $this->getJson('/api/reports/visits?date_from=2026-09-15&date_to=2026-09-15&print=true');
-    $res->assertStatus(422)
-        ->assertJsonPath('message', 'Print and PDF export limit of 5,000 rows exceeded. Please narrow your date range or filters.');
-});
-
-it('enforces 5000 rows limit on pdf export with 422', function () {
-    actingAsSupervisor();
-    $visitor = Visitor::factory()->create();
-
-    $now = now();
-    $rows = [];
-    for ($i = 0; $i < 5005; $i++) {
-        $rows[] = [
-            'id' => (string) Str::uuid(),
-            'visitor_id' => $visitor->id,
-            'purpose' => 'Inspection',
-            'date' => '2026-09-16',
-            'time_in' => '08:00:00',
-            'created_at' => $now,
-            'updated_at' => $now,
-        ];
-    }
-    foreach (array_chunk($rows, 1000) as $chunk) {
-        DB::table('visits')->insert($chunk);
-    }
-
-    $res = $this->getJson('/api/reports/visits/pdf?date_from=2026-09-16&date_to=2026-09-16');
-    $res->assertStatus(422)
-        ->assertJsonPath('message', 'Print and PDF export limit of 5,000 rows exceeded. Please narrow your date range or filters.');
+    $res->assertOk();
+    expect(count($res->json()))->toBe(5005);
 });

@@ -39,7 +39,9 @@ class VesselArrivalRequest extends FormRequest
         return [
             'location_id' => [$isPost ? 'required' : 'sometimes', 'uuid', 'exists:locations,id'],
             'sign_in_date' => [$isPost ? 'required' : 'sometimes', 'date'],
+            'sign_in_time' => ['nullable', 'date_format:H:i,H:i:s'],
             'sign_out_date' => $signOutRules,
+            'sign_out_time' => ['nullable', 'date_format:H:i,H:i:s'],
             'sign_in_port' => ['nullable', 'string', 'max:255'],
             'sign_out_port' => ['nullable', 'string', 'max:255'],
             'captain' => ['nullable', 'string', 'max:255'],

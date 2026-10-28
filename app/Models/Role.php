@@ -16,7 +16,7 @@ class Role extends SpatieRole
      * would silently vanish at the next seed. The API refuses to change or delete them and the SPA
      * shows them read-only (decision FE-3-ROLE, 2026-09-28).
      */
-    public const BUILT_IN = ['administrator', 'supervisor', 'security'];
+    public const BUILT_IN = ['administrator', 'supervisor', 'security', 'operator_pos'];
 
     /**
      * Every role and permission lives on the web guard, where the seeder puts them. Without this a

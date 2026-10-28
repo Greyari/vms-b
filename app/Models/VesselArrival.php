@@ -15,7 +15,7 @@ class VesselArrival extends Model
     protected $appends = ['total_days'];
 
     protected $fillable = [
-        'location_id', 'vessel_name', 'sign_in_date', 'sign_out_date', 'sign_in_port', 'sign_out_port', 'captain',
+        'location_id', 'vessel_name', 'sign_in_date', 'sign_in_time', 'sign_out_date', 'sign_out_time', 'sign_in_port', 'sign_out_port', 'captain',
         'local_agent_company', 'local_agent_name', 'local_agent_phone', 'local_agent_location',
         'foreign_agent_company', 'foreign_agent_name', 'foreign_agent_phone', 'foreign_agent_location',
     ];

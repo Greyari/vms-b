@@ -22,14 +22,7 @@ class ReportController extends Controller
         $query = $this->buildVisitsQuery($request);
 
         if ($request->boolean('print') || $request->input('limit') === 'print') {
-            $count = (clone $query)->count();
-            if ($count > 5000) {
-                return response()->json([
-                    'message' => 'Print and PDF export limit of 5,000 rows exceeded. Please narrow your date range or filters.',
-                ], 422);
-            }
-
-            $visits = $query->take(5000)->get();
+            $visits = $query->get();
 
             return response()->json(
                 $visits->map(fn (Visit $visit): array => (new VisitResource($visit))->resolve())->all()
@@ -96,14 +89,10 @@ class ReportController extends Controller
     {
         $query = $this->buildVisitsQuery($request);
 
-        $count = (clone $query)->count();
-        if ($count > 5000) {
-            return response()->json([
-                'message' => 'Print and PDF export limit of 5,000 rows exceeded. Please narrow your date range or filters.',
-            ], 422);
-        }
+        @ini_set('memory_limit', '512M');
+        @set_time_limit(300);
 
-        $visits = $query->take(5000)->get();
+        $visits = $query->get();
 
         $startDate = $request->input('date_from', $request->input('start_date'));
         $endDate = $request->input('date_to', $request->input('end_date'));
@@ -172,6 +161,9 @@ class ReportController extends Controller
         // Visitor type
         if ($request->filled('visitor_type')) {
             $query->whereHas('visitor', fn ($vq) => $vq->where('visitor_type', $request->input('visitor_type')));
+        } else {
+            // Exclude crew visits from visitor report by default
+            $query->whereDoesntHave('visitor', fn ($vq) => $vq->where('visitor_type', 'crew'));
         }
 
         // Staff
@@ -252,14 +244,7 @@ class ReportController extends Controller
         $query = $this->buildVesselsQuery($request);
 
         if ($request->boolean('print') || $request->input('limit') === 'print') {
-            $count = (clone $query)->count();
-            if ($count > 5000) {
-                return response()->json([
-                    'message' => 'Print and PDF export limit of 5,000 rows exceeded. Please narrow your date range or filters.',
-                ], 422);
-            }
-
-            return response()->json($query->take(5000)->get());
+            return response()->json($query->get());
         }
 
         $perPage = max(1, min((int) $request->input('per_page', 100), 100));
@@ -333,14 +318,10 @@ class ReportController extends Controller
         $mode = $request->input('mode', 'list_ships');
         $query = $this->buildVesselsQuery($request);
 
-        $count = (clone $query)->count();
-        if ($count > 5000) {
-            return response()->json([
-                'message' => 'Print and PDF export limit of 5,000 rows exceeded. Please narrow your date range or filters.',
-            ], 422);
-        }
+        @ini_set('memory_limit', '512M');
+        @set_time_limit(300);
 
-        $arrivals = $query->take(5000)->get();
+        $arrivals = $query->get();
 
         $startDate = $request->input('date_from', $request->input('start_date'));
         $endDate = $request->input('date_to', $request->input('end_date'));
@@ -394,6 +375,15 @@ class ReportController extends Controller
             $query->whereRaw('LOWER(vessel_name) LIKE ?', [$term]);
         }
 
+        $timeFrom = $request->input('time_from');
+        $timeTo = $request->input('time_to');
+        if ($timeFrom && strlen($timeFrom) === 5) {
+            $timeFrom .= ':00';
+        }
+        if ($timeTo && strlen($timeTo) === 5) {
+            $timeTo .= ':59';
+        }
+
         $stayStatus = $request->input('stay_status');
         if ($stayStatus === 'out') {
             $query->whereNotNull('sign_out_date');
@@ -403,6 +393,12 @@ class ReportController extends Controller
             if ($request->filled('date_to')) {
                 $query->where('sign_out_date', '<=', $request->input('date_to'));
             }
+            if ($timeFrom) {
+                $query->where('sign_out_time', '>=', $timeFrom);
+            }
+            if ($timeTo) {
+                $query->where('sign_out_time', '<=', $timeTo);
+            }
         } elseif ($stayStatus === 'not_out') {
             $query->whereNull('sign_out_date');
             if ($request->filled('date_from')) {
@@ -411,6 +407,12 @@ class ReportController extends Controller
             if ($request->filled('date_to')) {
                 $query->where('sign_in_date', '<=', $request->input('date_to'));
             }
+            if ($timeFrom) {
+                $query->where('sign_in_time', '>=', $timeFrom);
+            }
+            if ($timeTo) {
+                $query->where('sign_in_time', '<=', $timeTo);
+            }
         } else {
             // 'in' or 'all' or default
             if ($request->filled('date_from')) {
@@ -418,6 +420,12 @@ class ReportController extends Controller
             }
             if ($request->filled('date_to')) {
                 $query->where('sign_in_date', '<=', $request->input('date_to'));
+            }
+            if ($timeFrom) {
+                $query->where('sign_in_time', '>=', $timeFrom);
+            }
+            if ($timeTo) {
+                $query->where('sign_in_time', '<=', $timeTo);
             }
         }
 
@@ -434,14 +442,7 @@ class ReportController extends Controller
             : $this->buildCrewQuery($request);
 
         if ($request->boolean('print') || $request->input('limit') === 'print') {
-            $count = (clone $query)->count();
-            if ($count > 5000) {
-                return response()->json([
-                    'message' => 'Print and export limit of 5,000 rows exceeded. Please narrow your date range or filters.',
-                ], 422);
-            }
-
-            return response()->json($query->take(5000)->get());
+            return response()->json($query->get());
         }
 
         $perPage = max(1, min((int) $request->input('per_page', 50), 100));
@@ -550,14 +551,10 @@ class ReportController extends Controller
             ? $this->buildCrewLogsQuery($request)
             : $this->buildCrewQuery($request);
 
-        $count = (clone $query)->count();
-        if ($count > 5000) {
-            return response()->json([
-                'message' => 'Print and PDF export limit of 5,000 rows exceeded. Please narrow your date range or filters.',
-            ], 422);
-        }
+        @ini_set('memory_limit', '512M');
+        @set_time_limit(300);
 
-        $records = $query->take(5000)->get();
+        $records = $query->get();
 
         $startDate = $request->input('date_from', $request->input('start_date'));
         $endDate = $request->input('date_to', $request->input('end_date'));
@@ -636,6 +633,28 @@ class ReportController extends Controller
             });
         }
 
+        // Time range (applies to checked_in_at or vessel_arrival sign_in_time)
+        if ($request->filled('time_from')) {
+            $timeFrom = $request->input('time_from');
+            $query->where(function ($q) use ($timeFrom) {
+                $q->whereTime('checked_in_at', '>=', $timeFrom)
+                    ->orWhere(function ($sub) use ($timeFrom) {
+                        $sub->whereNull('checked_in_at')
+                            ->whereHas('vesselArrival', fn ($aq) => $aq->where('sign_in_time', '>=', $timeFrom));
+                    });
+            });
+        }
+        if ($request->filled('time_to')) {
+            $timeTo = $request->input('time_to');
+            $query->where(function ($q) use ($timeTo) {
+                $q->whereTime('checked_in_at', '<=', $timeTo)
+                    ->orWhere(function ($sub) use ($timeTo) {
+                        $sub->whereNull('checked_in_at')
+                            ->whereHas('vesselArrival', fn ($aq) => $aq->where('sign_in_time', '<=', $timeTo));
+                    });
+            });
+        }
+
         // Ordering: active status first, then newest created_at
         $query->orderByRaw("CASE WHEN status = 'checked_in' THEN 1 WHEN status = 'expected' THEN 2 ELSE 3 END")
             ->orderBy('created_at', 'desc');
@@ -701,6 +720,14 @@ class ReportController extends Controller
         }
         if ($request->filled('date_to')) {
             $query->whereDate('logged_at', '<=', $request->input('date_to'));
+        }
+
+        // Time range (logged_at)
+        if ($request->filled('time_from')) {
+            $query->whereTime('logged_at', '>=', $request->input('time_from'));
+        }
+        if ($request->filled('time_to')) {
+            $query->whereTime('logged_at', '<=', $request->input('time_to'));
         }
 
         $query->orderBy('logged_at', 'desc')->orderBy('id', 'desc');

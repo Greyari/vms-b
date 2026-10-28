@@ -137,3 +137,36 @@ it('exports crew placements to landscape a4 pdf download', function () {
     expect($response->headers->get('content-type'))->toBe('application/pdf');
     expect($response->headers->get('content-disposition'))->toContain('vessel-crew-report.pdf');
 });
+
+it('filters crew report by time_from and time_to', function () {
+    actingAsSupervisor();
+
+    $vessel = Location::factory()->create(['name' => 'TB. TIME BOAT']);
+    $arrival = VesselArrival::factory()->create([
+        'location_id' => $vessel->id,
+        'vessel_name' => 'TB. TIME BOAT',
+        'sign_in_date' => '2026-10-15',
+    ]);
+
+    $crew1 = Visitor::factory()->crew($vessel)->create(['name' => 'Early Crew']);
+    $crew2 = Visitor::factory()->crew($vessel)->create(['name' => 'Late Crew']);
+
+    $placement1 = VesselArrivalCrew::create([
+        'vessel_arrival_id' => $arrival->id,
+        'visitor_id' => $crew1->id,
+        'status' => 'checked_in',
+        'checked_in_at' => '2026-10-15 08:30:00',
+    ]);
+    $placement2 = VesselArrivalCrew::create([
+        'vessel_arrival_id' => $arrival->id,
+        'visitor_id' => $crew2->id,
+        'status' => 'checked_in',
+        'checked_in_at' => '2026-10-15 16:30:00',
+    ]);
+
+    $res = $this->getJson('/api/reports/crew?time_from=08:00&time_to=12:00')->assertOk();
+    $ids = collect($res->json('data'))->pluck('id')->all();
+
+    expect($ids)->toContain($placement1->id);
+    expect($ids)->not->toContain($placement2->id);
+});

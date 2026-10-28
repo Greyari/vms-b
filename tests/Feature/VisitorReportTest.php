@@ -151,6 +151,23 @@ it('filters visits by visitor_type', function () {
     expect($ids)->not->toContain($v2->id);
 });
 
+it('automatically excludes crew visits from visitor report when visitor_type is not specified', function () {
+    actingAsSupervisor();
+
+    $crew = Visitor::factory()->crew()->create();
+    $guest = Visitor::factory()->create(['visitor_type' => VisitorType::Visitor->value]);
+
+    $v1 = Visit::factory()->create(['visitor_id' => $crew->id]);
+    $v2 = Visit::factory()->create(['visitor_id' => $guest->id]);
+
+    $res = $this->getJson('/api/reports/visits')
+        ->assertOk();
+    $ids = collect($res->json('data'))->pluck('id')->all();
+
+    expect($ids)->toContain($v2->id);
+    expect($ids)->not->toContain($v1->id);
+});
+
 it('filters visits by staff name or host_name', function () {
     actingAsSupervisor();
 

@@ -20,7 +20,7 @@ it('refuses to rename a built-in role but allows updating permissions', function
         ->assertOk();
 
     expect($role->fresh()->hasPermissionTo('view_visits'))->toBeTrue();
-})->with(['administrator', 'supervisor', 'security']);
+})->with(['administrator', 'supervisor', 'security', 'operator_pos']);
 
 it('refuses to delete a built-in role', function (string $name) {
     actingAsAdmin();
@@ -29,7 +29,7 @@ it('refuses to delete a built-in role', function (string $name) {
     $this->deleteJson("/api/roles/{$role->id}")->assertStatus(422);
 
     expect(Role::where('name', $name)->exists())->toBeTrue();
-})->with(['administrator', 'supervisor', 'security']);
+})->with(['administrator', 'supervisor', 'security', 'operator_pos']);
 
 it('still lets an admin edit and delete a role they created', function () {
     actingAsAdmin();
@@ -63,6 +63,7 @@ it('marks which roles are built in', function () {
         'administrator' => true,
         'security' => true,
         'supervisor' => true,
+        'operator_pos' => true,
         'gate trainee' => false,
     ]);
 });

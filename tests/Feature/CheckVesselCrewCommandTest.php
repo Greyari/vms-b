@@ -76,7 +76,7 @@ class CheckVesselCrewCommandTest extends TestCase
 
         $crew = Visitor::factory()->crew($vessel)->create([
             'name' => 'Surya Gemilang',
-            'visitor_no' => 'CRW-2026-0099',
+            'visitor_no' => 1000099,
         ]);
 
         VesselArrivalCrew::create([
@@ -97,6 +97,7 @@ class CheckVesselCrewCommandTest extends TestCase
         expect($exitCode)->toBe(0);
         expect($output)->toContain('DETAILED CREW ROSTER');
         expect($output)->toContain('Surya Gemilang');
+        expect($output)->toContain('1000099');
         expect($output)->toContain('CHECKED_IN');
     }
 

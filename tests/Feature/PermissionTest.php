@@ -3,6 +3,7 @@
 use App\Models\Location;
 use App\Models\Staff;
 use App\Models\User;
+use App\Models\VesselArrival;
 use App\Models\Visit;
 use App\Models\Visitor;
 use App\Models\VisitorCard;
@@ -126,4 +127,33 @@ it('forbids a security-role user from accessing vessel arrivals and reports endp
     $this->getJson('/api/vessel-arrivals')->assertStatus(403)->assertJsonStructure(['message']);
     $this->getJson('/api/reports/visits')->assertStatus(403)->assertJsonStructure(['message']);
     $this->getJson('/api/reports/vessels')->assertStatus(403)->assertJsonStructure(['message']);
+});
+
+it('allows operator_pos role to check out visits and check in/out crew but forbids managing vessel arrivals', function () {
+    $user = User::factory()->create();
+    $user->assignRole('operator_pos');
+    actingAsUser($user);
+
+    // Can view visits and vessel arrivals
+    $this->getJson('/api/visits')->assertOk();
+    $this->getJson('/api/vessel-arrivals')->assertOk();
+
+    // Forbids creating a visit (no create_visits)
+    $this->postJson('/api/visits', [])->assertStatus(403);
+
+    // Forbids creating a vessel arrival (no manage_vessel_arrivals)
+    $this->postJson('/api/vessel-arrivals', [])->assertStatus(403);
+
+    // Can check in and check out crew via checkout_visits permission
+    $arrival = VesselArrival::factory()->create();
+    $crew = Visitor::factory()->crew()->create();
+    $arrival->crew()->attach($crew->id, ['status' => 'expected']);
+
+    $this->postJson("/api/vessel-arrivals/{$arrival->id}/crew/check-in", [
+        'crew_ids' => [$crew->id],
+    ])->assertOk();
+
+    $this->postJson("/api/vessel-arrivals/{$arrival->id}/crew/check-out", [
+        'crew_ids' => [$crew->id],
+    ])->assertOk();
 });

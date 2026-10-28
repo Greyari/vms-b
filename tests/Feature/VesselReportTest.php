@@ -230,3 +230,29 @@ it('lists all attached crew in list_ships_with_crew mode by default and supports
     expect($rowActive['crew'])->toHaveCount(1);
     expect($rowActive['crew'][0]['name'])->toBe('Active Crew 1');
 });
+
+it('filters vessel report by time_from and time_to', function () {
+    actingAsSupervisor();
+
+    $vessel1 = Location::factory()->create(['name' => 'MV. MORNING STAR']);
+    $vessel2 = Location::factory()->create(['name' => 'MV. AFTERNOON SUN']);
+
+    $arr1 = VesselArrival::factory()->create([
+        'location_id' => $vessel1->id,
+        'vessel_name' => 'MV. MORNING STAR',
+        'sign_in_date' => '2026-10-10',
+        'sign_in_time' => '08:30:00',
+    ]);
+    $arr2 = VesselArrival::factory()->create([
+        'location_id' => $vessel2->id,
+        'vessel_name' => 'MV. AFTERNOON SUN',
+        'sign_in_date' => '2026-10-10',
+        'sign_in_time' => '15:45:00',
+    ]);
+
+    $res = $this->getJson('/api/reports/vessels?time_from=08:00&time_to=12:00')->assertOk();
+    $ids = collect($res->json('data'))->pluck('id')->all();
+
+    expect($ids)->toContain($arr1->id);
+    expect($ids)->not->toContain($arr2->id);
+});

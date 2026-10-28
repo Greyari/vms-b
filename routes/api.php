@@ -208,13 +208,15 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/vessel-arrivals/{id}/crew-logs/export', [VesselArrivalController::class, 'exportCrewLogs'])->whereUuid('id');
         Route::get('/vessel-arrivals/{id}', [VesselArrivalController::class, 'show'])->whereUuid('id');
     });
+    Route::middleware('permission:manage_vessel_arrivals|checkout_visits')->group(function () {
+        Route::post('/vessel-arrivals/{id}/crew/check-in', [VesselArrivalController::class, 'checkInCrew'])->whereUuid('id');
+        Route::post('/vessel-arrivals/{id}/crew/check-out', [VesselArrivalController::class, 'checkOutCrew'])->whereUuid('id');
+        Route::post('/vessel-arrivals/{id}/crew/reactivate', [VesselArrivalController::class, 'reactivateCrew'])->whereUuid('id');
+    });
     Route::middleware('permission:manage_vessel_arrivals')->group(function () {
         Route::post('/vessel-arrivals', [VesselArrivalController::class, 'store']);
         Route::put('/vessel-arrivals/{id}', [VesselArrivalController::class, 'update'])->whereUuid('id');
-        Route::post('/vessel-arrivals/{id}/crew/check-in', [VesselArrivalController::class, 'checkInCrew'])->whereUuid('id');
-        Route::post('/vessel-arrivals/{id}/crew/check-out', [VesselArrivalController::class, 'checkOutCrew'])->whereUuid('id');
         Route::post('/vessel-arrivals/{id}/crew/detach', [VesselArrivalController::class, 'detachCrew'])->whereUuid('id');
-        Route::post('/vessel-arrivals/{id}/crew/reactivate', [VesselArrivalController::class, 'reactivateCrew'])->whereUuid('id');
         Route::post('/vessel-arrivals/{id}/crew/transfer', [VesselArrivalController::class, 'transferCrew'])->whereUuid('id');
         Route::delete('/vessel-arrivals/{id}', [VesselArrivalController::class, 'destroy'])->whereUuid('id');
     });

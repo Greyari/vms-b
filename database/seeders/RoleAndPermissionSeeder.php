@@ -57,6 +57,14 @@ class RoleAndPermissionSeeder extends Seeder
             'view_reports', 'export_visits',
         ]));
 
+        // Role khusus operator pos jaga: hanya checkout visitor dan check-in/out kru
+        $operatorPosRole = Role::firstOrCreate(['name' => 'operator_pos']);
+        $operatorPosRole->syncPermissions([
+            'view_visits',
+            'checkout_visits',
+            'view_vessel_arrivals',
+        ]);
+
         // Akun awal HANYA dibuat kalau password-nya dipasok dari environment.
         //
         // Sebelumnya keduanya lahir dengan password 'password123' yang tertulis
