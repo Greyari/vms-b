@@ -181,7 +181,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('vehicle-cards', VehicleCardController::class)->only(['store', 'update', 'destroy'])->middleware('permission:manage_cards');
 
     // --- Locations and vessels -------------------------------------------
-    Route::middleware('permission:view_locations')->group(function () {
+    Route::middleware('permission:view_locations|view_visits|view_vessel_arrivals')->group(function () {
         Route::get('/locations', [LocationController::class, 'index']);
         Route::get('/locations/{id}', [LocationController::class, 'show'])->whereUuid('id');
     });

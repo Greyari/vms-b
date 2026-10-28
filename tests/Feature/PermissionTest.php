@@ -134,9 +134,13 @@ it('allows operator_pos role to check out visits and check in/out crew but forbi
     $user->assignRole('operator_pos');
     actingAsUser($user);
 
-    // Can view visits and vessel arrivals
+    // Can view visits, vessel arrivals, and locations (for filter dropdowns)
     $this->getJson('/api/visits')->assertOk();
     $this->getJson('/api/vessel-arrivals')->assertOk();
+    $this->getJson('/api/locations')->assertOk();
+
+    // Forbids managing locations (no manage_locations)
+    $this->postJson('/api/locations', [])->assertStatus(403);
 
     // Forbids creating a visit (no create_visits)
     $this->postJson('/api/visits', [])->assertStatus(403);
