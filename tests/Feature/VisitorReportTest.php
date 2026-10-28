@@ -198,6 +198,11 @@ it('filters visits by location name or location_code_or_vehicle_no', function ()
     $resPlate = $this->getJson('/api/reports/visits?location_code_or_vehicle_no=9988+ZZ')
         ->assertOk();
     expect(collect($resPlate->json('data'))->pluck('id')->all())->toBe([$v2->id]);
+
+    // Filter vehicle_no directly
+    $resVeh = $this->getJson('/api/reports/visits?vehicle_no=1234+XX')
+        ->assertOk();
+    expect(collect($resVeh->json('data'))->pluck('id')->all())->toBe([$v1->id]);
 });
 
 it('filters visits by card_no (visitor card or vehicle card) and card_type', function () {

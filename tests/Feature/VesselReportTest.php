@@ -203,7 +203,7 @@ it('exports vessels report to landscape a4 pdf download in list_ships_with_crew 
     expect($res->headers->get('content-disposition'))->toContain('vessel-crew-manifest-report.pdf');
 });
 
-it('only lists active/registered crew in list_ships_with_crew mode by default and excludes checked out crew', function () {
+it('lists all attached crew in list_ships_with_crew mode by default and supports filtering active only', function () {
     actingAsSupervisor();
 
     $vessel = Location::factory()->create(['name' => 'MV. VOYAGE CREW TEST']);
@@ -218,13 +218,15 @@ it('only lists active/registered crew in list_ships_with_crew mode by default an
     $arrival->crew()->attach($activeCrew->id, ['status' => 'checked_in']);
     $arrival->crew()->attach($checkedOutCrew->id, ['status' => 'checked_out']);
 
+    // By default, both active and checked out crew are listed
     $res = $this->getJson('/api/reports/vessels?mode=list_ships_with_crew')->assertOk();
     $row = collect($res->json('data'))->firstWhere('id', $arrival->id);
-    expect($row['crew'])->toHaveCount(1);
-    expect($row['crew'][0]['name'])->toBe('Active Crew 1');
+    expect($row['crew'])->toHaveCount(2);
+    expect(collect($row['crew'])->pluck('name')->all())->toContain('Active Crew 1', 'Checked Out Crew 2');
 
-    // With crew_status=all, both are included
-    $resAll = $this->getJson('/api/reports/vessels?mode=list_ships_with_crew&crew_status=all')->assertOk();
-    $rowAll = collect($resAll->json('data'))->firstWhere('id', $arrival->id);
-    expect($rowAll['crew'])->toHaveCount(2);
+    // With crew_status=active, only active crew is included
+    $resActive = $this->getJson('/api/reports/vessels?mode=list_ships_with_crew&crew_status=active')->assertOk();
+    $rowActive = collect($resActive->json('data'))->firstWhere('id', $arrival->id);
+    expect($rowActive['crew'])->toHaveCount(1);
+    expect($rowActive['crew'][0]['name'])->toBe('Active Crew 1');
 });

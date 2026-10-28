@@ -82,7 +82,6 @@ class ReportController extends Controller
                         'Staff Occupation' => $visit->staff?->occupation ?? '-',
                         'Staff Department' => $visit->staff?->department ?? '-',
                         'Location' => $visit->location_name ?: ($visit->location?->name ?? '-'),
-                        'Location Code' => $visit->location?->code ?? '-',
                         'Purpose' => $visit->purpose ?? '-',
                         'Visitor Cards' => $cards ?: '-',
                         'Vehicle Card' => $visit->vehicleCard?->card_no ?? '-',
@@ -193,6 +192,19 @@ class ReportController extends Controller
             });
         }
 
+        // Vehicle no
+        if ($request->filled('vehicle_no')) {
+            $rawVal = trim((string) $request->input('vehicle_no'));
+            $term = '%'.strtolower(addcslashes($rawVal, '%_\\')).'%';
+            $normPlate = Visit::normalizePlate($rawVal);
+            $query->where(function ($q) use ($term, $normPlate) {
+                $q->whereRaw('LOWER(COALESCE(vehicle_no, \'\')) LIKE ?', [$term]);
+                if ($normPlate !== null) {
+                    $q->orWhere('plate_normalized', 'LIKE', '%'.$normPlate.'%');
+                }
+            });
+        }
+
         // Location code or vehicle no
         if ($request->filled('location_code_or_vehicle_no')) {
             $rawVal = trim((string) $request->input('location_code_or_vehicle_no'));
@@ -270,13 +282,7 @@ class ReportController extends Controller
                             $writer->addRow([
                                 'IMO / Code' => $arrival->vessel?->code ?? '-',
                                 'Vessel Name' => $arrival->vessel_name ?? $arrival->vessel?->name ?? '-',
-                                'Sign In Date' => $arrival->sign_in_date ? Carbon::parse($arrival->sign_in_date)->format('d/m/Y') : '-',
-                                'Sign In Port' => $arrival->sign_in_port ?? '-',
-                                'Sign Out Date' => $arrival->sign_out_date ? Carbon::parse($arrival->sign_out_date)->format('d/m/Y') : '-',
-                                'Sign Out Port' => $arrival->sign_out_port ?? '-',
-                                'Total Days' => $arrival->total_days,
                                 'Captain' => $arrival->captain ?? '-',
-                                'Crew No' => '-',
                                 'Crew Name' => '-',
                                 'ID Type' => '-',
                                 'ID Number' => '-',
@@ -291,20 +297,14 @@ class ReportController extends Controller
                                 $writer->addRow([
                                     'IMO / Code' => $arrival->vessel?->code ?? '-',
                                     'Vessel Name' => $arrival->vessel_name ?? $arrival->vessel?->name ?? '-',
-                                    'Sign In Date' => $arrival->sign_in_date ? Carbon::parse($arrival->sign_in_date)->format('d/m/Y') : '-',
-                                    'Sign In Port' => $arrival->sign_in_port ?? '-',
-                                    'Sign Out Date' => $arrival->sign_out_date ? Carbon::parse($arrival->sign_out_date)->format('d/m/Y') : '-',
-                                    'Sign Out Port' => $arrival->sign_out_port ?? '-',
-                                    'Total Days' => $arrival->total_days,
                                     'Captain' => $arrival->captain ?? '-',
-                                    'Crew No' => $crew->visitor_no ?? '-',
                                     'Crew Name' => $crew->name ?? '-',
                                     'ID Type' => strtoupper($crew->id_type ?? '-'),
                                     'ID Number' => $crew->id_number ?? '-',
                                     'Gender' => $crew->gender ?? '-',
                                     'Occupation' => $crew->occupation ?? '-',
                                     'Nationality' => $crew->nationality ?? '-',
-                                    'Certificate' => $crew->certificate ?? '-',
+                                    'Certificate' => $crew->certificate ?? $crew->certificate_no ?? '-',
                                     'Seaman Book No' => $crew->seaman_book_no ?? '-',
                                 ]);
                             }
@@ -360,7 +360,7 @@ class ReportController extends Controller
         $query = VesselArrival::query();
 
         if ($mode === 'list_ships_with_crew') {
-            $crewStatus = $request->input('crew_status', 'active');
+            $crewStatus = $request->input('crew_status', 'all');
             $query->with(['vessel', 'crew' => function ($q) use ($request, $crewStatus) {
                 $q->where('visitor_type', 'crew');
                 if ($crewStatus === 'active') {

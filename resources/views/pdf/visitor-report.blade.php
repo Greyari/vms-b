@@ -62,7 +62,6 @@
                 <th>ID Number</th>
                 <th>Company</th>
                 <th>Location</th>
-                <th>Location Code</th>
                 <th>Staff To Visit</th>
                 <th>Purpose</th>
                 <th>Cards</th>
@@ -83,7 +82,6 @@
                 <td>{{ $visit->visitor?->id_number ?? '-' }}</td>
                 <td>{{ $visit->visitor_company ?: ($visit->visitor?->company ?? '-') }}</td>
                 <td>{{ $visit->location_name ?: ($visit->location?->name ?? '-') }}</td>
-                <td>{{ $visit->location?->code ?? '-' }}</td>
                 <td>
                     {{ $visit->host_name ?: ($visit->staff?->name ?? '-') }}
                     @if($visit->staff?->occupation)

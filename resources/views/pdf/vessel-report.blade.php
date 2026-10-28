@@ -59,11 +59,7 @@
                 <th style="width: 20px;">NO</th>
                 <th>IMO / CODE</th>
                 <th>VESSEL NAME</th>
-                <th>SIGN IN</th>
-                <th>SIGN OUT</th>
-                <th>DAYS</th>
                 <th>CAPTAIN</th>
-                <th>CREW NO</th>
                 <th>CREW NAME</th>
                 <th>ID TYPE</th>
                 <th>ID NUMBER</th>
@@ -82,11 +78,7 @@
                     <td style="text-align: center;">{{ $rowNo++ }}</td>
                     <td>{{ $arrival->vessel?->code ?? '-' }}</td>
                     <td>{{ $arrival->vessel_name ?? $arrival->vessel?->name ?? '-' }}</td>
-                    <td style="text-align: center;">{{ $arrival->sign_in_date ? \Carbon\Carbon::parse($arrival->sign_in_date)->format('d/m/Y') : '-' }}</td>
-                    <td style="text-align: center;">{{ $arrival->sign_out_date ? \Carbon\Carbon::parse($arrival->sign_out_date)->format('d/m/Y') : '-' }}</td>
-                    <td style="text-align: center;">{{ $arrival->total_days }}</td>
                     <td>{{ $arrival->captain ?? '-' }}</td>
-                    <td style="text-align: center;">-</td>
                     <td>-</td>
                     <td style="text-align: center;">-</td>
                     <td>-</td>
@@ -102,11 +94,7 @@
                         <td style="text-align: center;">{{ $rowNo++ }}</td>
                         <td>{{ $arrival->vessel?->code ?? '-' }}</td>
                         <td>{{ $arrival->vessel_name ?? $arrival->vessel?->name ?? '-' }}</td>
-                        <td style="text-align: center;">{{ $arrival->sign_in_date ? \Carbon\Carbon::parse($arrival->sign_in_date)->format('d/m/Y') : '-' }}</td>
-                        <td style="text-align: center;">{{ $arrival->sign_out_date ? \Carbon\Carbon::parse($arrival->sign_out_date)->format('d/m/Y') : '-' }}</td>
-                        <td style="text-align: center;">{{ $arrival->total_days }}</td>
                         <td>{{ $arrival->captain ?? '-' }}</td>
-                        <td style="text-align: center;">{{ $crew->visitor_no ?? '-' }}</td>
                         <td>{{ $crew->name ?? '-' }}</td>
                         <td style="text-align: center;">{{ strtoupper($crew->id_type ?? '-') }}</td>
                         <td>{{ $crew->id_number ?? '-' }}</td>

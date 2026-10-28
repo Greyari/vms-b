@@ -1207,7 +1207,7 @@ class VisitController extends Controller
                     'Visitor Name' => $visit->visitor?->name ?? '-',
                     'Company' => $visit->visitor?->company ?? '-',
                     'Purpose' => $visit->purpose,
-                    'Host Staff' => $visit->staff?->name ?? 'Unknown',
+                    'Staff to Visit' => $visit->staff?->name ?? 'Unknown',
                     'Visitor Cards' => $visit->visitorCards->pluck('card_no')->join(', ') ?: '-',
                     'Vehicle Card' => $visit->vehicleCard?->card_no ?? '-',
                     'Vehicle No' => $visit->vehicle_no ?? '-',
