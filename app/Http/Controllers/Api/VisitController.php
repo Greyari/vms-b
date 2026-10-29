@@ -375,7 +375,6 @@ class VisitController extends Controller
             'birth_place' => ['nullable', 'string', 'max:255'],
             'nationality' => ['nullable', 'string', 'max:255'],
             'occupation' => ['nullable', 'string', 'max:255'],
-            'phone' => ['nullable', 'string', 'max:255'],
             'id_issued_at' => ['nullable', 'date'],
             'id_expires_at' => ['nullable', 'date'],
             'id_lifetime' => ['sometimes', 'nullable', 'boolean'],
@@ -478,7 +477,7 @@ class VisitController extends Controller
 
         $profileKeys = [
             'name', 'company', 'visitor_type', 'gender', 'birth_date', 'birth_place',
-            'nationality', 'occupation', 'phone', 'id_issued_at', 'id_expires_at',
+            'nationality', 'occupation', 'id_issued_at', 'id_expires_at',
             'id_lifetime', 'vessel_id', 'certificate', 'certificate_no',
             'seaman_book_no', 'seaman_book_expires_at',
         ];

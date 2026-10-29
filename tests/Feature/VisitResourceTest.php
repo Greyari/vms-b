@@ -18,7 +18,6 @@ function visitorWithPrivateProfile(): Visitor
         'name' => 'Profile Owner',
         'birth_date' => '1990-01-31',
         'birth_place' => 'PRIVATE-BIRTHPLACE',
-        'phone' => 'PRIVATE-PHONE-0812',
         'nationality' => 'PRIVATE-NATIONALITY',
         'certificate_no' => 'PRIVATE-CERT-77',
         'seaman_book_no' => 'PRIVATE-SEAMAN-88',

@@ -123,7 +123,6 @@ class VisitorTransformerTest extends TestCase
         $this->assertSame('Ahmad Updated', $canonical['attributes']['name']);
         // Merged non-empty fields from row 100
         $this->assertSame('PT Lama', $canonical['attributes']['company']);
-        $this->assertSame('0811111111', $canonical['attributes']['phone']);
         $this->assertSame('Batam', $canonical['attributes']['birth_place']);
         $this->assertEqualsCanonicalizing(['250', '100'], $canonical['member_visitor_ids']);
     }

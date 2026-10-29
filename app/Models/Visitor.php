@@ -23,7 +23,7 @@ class Visitor extends Model
      */
     protected $fillable = [
         'id_type', 'id_number', 'name', 'company',
-        'visitor_type', 'gender', 'birth_date', 'birth_place', 'nationality', 'occupation', 'phone', 'email', 'address',
+        'visitor_type', 'gender', 'birth_date', 'birth_place', 'nationality', 'occupation',
         'id_issued_at', 'id_expires_at', 'id_lifetime',
         'vessel_id', 'certificate', 'certificate_no', 'seaman_book_no', 'seaman_book_expires_at',
         'badge_code', 'offences', 'blacklisted_at', 'remark',

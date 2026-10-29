@@ -34,9 +34,6 @@ class VisitorProfileResource extends JsonResource
             'birth_place' => $this->birth_place,
             'nationality' => $this->nationality,
             'occupation' => $this->occupation,
-            'phone' => $this->phone,
-            'email' => $this->email,
-            'address' => $this->address,
             'company' => $this->company,
             'vessel_id' => $this->vessel_id,
             'vessel' => $this->whenLoaded('vessel', fn (): ?array => $this->vessel === null ? null : [

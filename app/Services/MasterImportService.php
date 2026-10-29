@@ -158,13 +158,10 @@ class MasterImportService
                         'company' => 'PT Pelayaran Mandiri',
                         'occupation' => 'Teknisi Kapal',
                         'visitor_type' => 'visitor',
-                        'phone' => '081234567890',
-                        'email' => 'budi.santoso@example.com',
                         'gender' => 'male',
                         'birth_date' => '1990-05-20',
                         'birth_place' => 'Batam',
                         'nationality' => 'Indonesia',
-                        'address' => 'Jl. Duyung No. 12, Batam',
                     ]);
                     $writer->addRow([
                         'name' => 'Michael Chang',
@@ -173,13 +170,10 @@ class MasterImportService
                         'company' => 'Global Marine Survey',
                         'occupation' => 'Marine Inspector',
                         'visitor_type' => 'supplier',
-                        'phone' => '+6591234567',
-                        'email' => 'michael@example.com',
                         'gender' => 'male',
                         'birth_date' => '1985-11-12',
                         'birth_place' => 'Singapore',
                         'nationality' => 'Singaporean',
-                        'address' => '10 Marina Boulevard, Singapore',
                     ]);
                 }, 'template_visitors.xlsx');
 
@@ -1280,9 +1274,6 @@ class MasterImportService
                         'id_number' => $existing->id_number,
                         'company' => $existing->company,
                         'occupation' => $existing->occupation,
-                        'phone' => $existing->phone,
-                        'email' => $existing->email,
-                        'address' => $existing->address,
                     ] : null,
                 ];
 
@@ -1552,13 +1543,10 @@ class MasterImportService
                 $idNumber = IdentityNumber::normalize(self::extractRowValue($row, ['id_number', 'nomor_identitas', 'no_ktp', 'nik', 'ktp_no', 'passport_no']));
                 $company = self::extractRowValue($row, ['company', 'perusahaan']);
                 $occupation = self::extractRowValue($row, ['occupation', 'jabatan', 'profesi']);
-                $phone = self::extractRowValue($row, ['phone', 'telepon', 'no_hp']);
-                $email = self::extractRowValue($row, ['email', 'surel']);
                 $birthPlace = self::extractRowValue($row, ['birth_place', 'tempat_lahir']);
                 $rawBirthDate = self::extractRowValue($row, ['birth_date', 'tanggal_lahir', 'tgl_lahir']);
                 $birthDate = self::parseDate($rawBirthDate);
                 $nationality = self::extractRowValue($row, ['nationality', 'kewarganegaraan'], 'Indonesia');
-                $address = self::extractRowValue($row, ['address', 'alamat', 'alamat_domisili']);
 
                 $gender = self::parseGender(self::extractRowValue($row, ['gender', 'jenis_kelamin']));
 
@@ -1576,14 +1564,11 @@ class MasterImportService
                     'id_number' => $idNumber,
                     'company' => $company !== '' ? $company : null,
                     'occupation' => $occupation !== '' ? $occupation : null,
-                    'phone' => $phone !== '' ? $phone : null,
-                    'email' => $email !== '' ? $email : null,
                     'birth_place' => $birthPlace !== '' ? $birthPlace : null,
                     'birth_date' => $birthDate,
                     'nationality' => $nationality !== '' ? $nationality : 'Indonesia',
                     'gender' => $gender,
                     'visitor_type' => $rawVisitorType,
-                    'address' => $address !== '' ? $address : null,
                 ];
 
                 if (! $isDuplicate || ! $model) {

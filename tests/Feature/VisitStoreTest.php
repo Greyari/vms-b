@@ -401,7 +401,6 @@ it('registers a new visitor with full profile attributes during check-in', funct
         'birth_place' => 'Surabaya',
         'nationality' => 'ID',
         'occupation' => 'Chief Officer',
-        'phone' => '08129876543',
         'id_issued_at' => '2020-01-10',
         'id_expires_at' => '2030-01-10',
         'id_lifetime' => false,
@@ -423,7 +422,6 @@ it('registers a new visitor with full profile attributes during check-in', funct
     expect($visitor->birth_place)->toBe('Surabaya');
     expect($visitor->nationality)->toBe('ID');
     expect($visitor->occupation)->toBe('Chief Officer');
-    expect($visitor->phone)->toBe('08129876543');
     expect($visitor->vessel_id)->toBe($vessel->id);
     expect($visitor->certificate)->toBe('ANT-II');
     expect($visitor->certificate_no)->toBe('CERT-2026-99');

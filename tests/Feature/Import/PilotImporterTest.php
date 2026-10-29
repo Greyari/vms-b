@@ -47,7 +47,6 @@ class PilotImporterTest extends TestCase
             'id_number' => '1111222233334444',
             'name' => 'Existing VMS Old Guy',
             'company' => 'PT ASL Old',
-            'phone' => null, // empty, to be merged
             'is_blacklisted' => false,
             'id_lifetime' => true,
         ]);
@@ -119,7 +118,6 @@ class PilotImporterTest extends TestCase
         // 7. Assert Visitor Merging
         $existingVisitor->refresh();
         $this->assertSame(500, $existingVisitor->visitor_no); // visitor_no unchanged!
-        $this->assertSame('0811223344', $existingVisitor->phone); // merged phone
 
         // Assert New Visitor
         $newVisitor = Visitor::where('id_number', '9999888877776666')->first();

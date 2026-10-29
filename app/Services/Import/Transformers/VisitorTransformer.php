@@ -91,7 +91,6 @@ class VisitorTransformer
             'birth_place' => trim((string) ($row['PlaceofBirth'] ?? '')) ?: null,
             'nationality' => $nationality,
             'occupation' => trim((string) ($row['VisitorOccupation'] ?? '')) ?: null,
-            'phone' => trim((string) ($row['PhoneNo'] ?? '')) ?: null,
             'id_issued_at' => self::parseDate($row['IssueDate'] ?? null),
             'id_expires_at' => $idExpiresAt,
             'id_lifetime' => $idLifetime,

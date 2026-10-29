@@ -38,7 +38,6 @@ it('exports the filtered visitors with their profile columns', function () {
     $vessel = Location::factory()->create(['code' => 'IMO9400001']);
     Visitor::factory()->crew($vessel)->create([
         'name' => 'Sample Crew One',
-        'phone' => '0800-0000-0004',
         'seaman_book_no' => 'SB-SAMPLE-4',
     ]);
     Visitor::factory()->create(['name' => 'Sample Supplier', 'visitor_type' => 'supplier']);
@@ -48,7 +47,6 @@ it('exports the filtered visitors with their profile columns', function () {
     expect($rows)->toHaveCount(1)
         ->and($rows[0]['Name'])->toBe('Sample Crew One')
         ->and($rows[0]['Visitor Type'])->toBe('crew')
-        ->and($rows[0]['Phone'])->toBe('0800-0000-0004')
         ->and($rows[0]['Vessel'])->toBe('IMO9400001')
         ->and($rows[0]['Seaman Book No'])->toBe('SB-SAMPLE-4');
 });

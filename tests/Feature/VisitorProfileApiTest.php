@@ -9,7 +9,6 @@ it('shows the whole profile with a summary of the visits', function () {
     actingAsSecurity();
     $vessel = Location::factory()->create(['code' => 'IMO9200001', 'name' => 'MT. SAMPLE CREW SHIP']);
     $visitor = Visitor::factory()->crew($vessel)->create([
-        'phone' => '0800-0000-0001',
         'birth_date' => '1990-04-05',
         'seaman_book_no' => 'SB-SAMPLE-1',
     ]);
@@ -18,7 +17,6 @@ it('shows the whole profile with a summary of the visits', function () {
 
     $this->getJson("/api/visitors/{$visitor->id}")
         ->assertOk()
-        ->assertJsonPath('visitor.phone', '0800-0000-0001')
         ->assertJsonPath('visitor.birth_date', '1990-04-05')
         ->assertJsonPath('visitor.visitor_type', 'crew')
         ->assertJsonPath('visitor.vessel.code', 'IMO9200001')
@@ -50,7 +48,6 @@ it('saves the whole profile on update', function () {
         'birth_place' => 'Sample City',
         'nationality' => 'SAMPLELAND',
         'occupation' => 'Engineer',
-        'phone' => '0800-0000-0002',
         'id_issued_at' => '2020-01-01',
         'id_expires_at' => '2030-01-01',
         'vessel_id' => $vessel->id,
@@ -70,7 +67,7 @@ it('saves the whole profile on update', function () {
 
 it('keeps the profile fields an update does not send', function () {
     actingAsAdmin();
-    $visitor = Visitor::factory()->create(['phone' => '0800-0000-0003', 'occupation' => 'Surveyor']);
+    $visitor = Visitor::factory()->create(['occupation' => 'Surveyor']);
 
     $this->putJson("/api/visitors/{$visitor->id}", [
         'id_type' => $visitor->id_type,
@@ -78,8 +75,7 @@ it('keeps the profile fields an update does not send', function () {
         'name' => 'Renamed Sample',
     ])->assertOk();
 
-    expect($visitor->fresh()->phone)->toBe('0800-0000-0003')
-        ->and($visitor->fresh()->occupation)->toBe('Surveyor');
+    expect($visitor->fresh()->occupation)->toBe('Surveyor');
 });
 
 it('refuses an unknown visitor type, gender or vessel', function () {

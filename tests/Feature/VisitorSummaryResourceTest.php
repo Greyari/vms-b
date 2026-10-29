@@ -15,7 +15,6 @@ function profiledVisitor(array $overrides = []): Visitor
         'gender' => 'F',
         'birth_date' => '1991-02-03',
         'visitor_type' => 'supplier',
-        'phone' => 'PRIVATE-PHONE-0813',
         'nationality' => 'PRIVATE-NATIONALITY',
         'seaman_book_no' => 'PRIVATE-SEAMAN-99',
     ], $overrides));

@@ -196,7 +196,7 @@ class PilotImporter
             if ($existing) {
                 // Merge non-null fields without overwriting existing data
                 $updated = false;
-                $mergeFields = ['name', 'company', 'phone', 'birth_date', 'birth_place', 'occupation'];
+                $mergeFields = ['name', 'company', 'birth_date', 'birth_place', 'occupation'];
                 foreach ($mergeFields as $field) {
                     if (blank($existing->{$field}) && ! blank($row[$field] ?? null)) {
                         $existing->{$field} = trim((string) $row[$field]);
@@ -219,7 +219,6 @@ class PilotImporter
                             'id_number' => $normId,
                             'name' => trim((string) ($row['name'] ?? '')),
                             'company' => trim((string) ($row['company'] ?? '')) ?: null,
-                            'phone' => trim((string) ($row['phone'] ?? '')) ?: null,
                             'visitor_type' => VisitorType::Visitor,
                             'is_blacklisted' => false,
                             'id_lifetime' => true,
