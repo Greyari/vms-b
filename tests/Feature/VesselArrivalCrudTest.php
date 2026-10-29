@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\LocationType;
 use App\Models\Location;
 use App\Models\Staff;
 use App\Models\VesselArrival;
@@ -62,6 +63,51 @@ it('rejects sign_out_date earlier than sign_in_date', function () {
         'location_id' => $vessel->id,
         'sign_in_date' => '2026-09-20',
         'sign_out_date' => '2026-09-18',
+    ])->assertStatus(422)
+        ->assertJsonValidationErrors(['sign_out_date']);
+});
+
+it('rejects sign_out_date on creation or update for staying vessels like tugboats and barges', function () {
+    actingAsSupervisor();
+    $tugboat = Location::factory()->create([
+        'name' => 'TB. NUSANTARA 01',
+        'type' => LocationType::TugBoat,
+    ]);
+    $barge = Location::factory()->create([
+        'name' => 'BG. MAJU 02',
+        'type' => LocationType::Barge,
+    ]);
+
+    // Reject on create
+    $this->postJson('/api/vessel-arrivals', [
+        'location_id' => $tugboat->id,
+        'sign_in_date' => '2026-09-20',
+        'sign_out_date' => '2026-09-21',
+    ])->assertStatus(422)
+        ->assertJsonValidationErrors(['sign_out_date']);
+
+    // Allow create without sign_out_date
+    $arrivalTug = VesselArrival::factory()->create([
+        'location_id' => $tugboat->id,
+        'vessel_name' => $tugboat->name,
+        'sign_in_date' => '2026-09-20',
+        'sign_out_date' => null,
+    ]);
+    $arrivalBarge = VesselArrival::factory()->create([
+        'location_id' => $barge->id,
+        'vessel_name' => $barge->name,
+        'sign_in_date' => '2026-09-20',
+        'sign_out_date' => null,
+    ]);
+
+    // Reject on update
+    $this->putJson("/api/vessel-arrivals/{$arrivalTug->id}", [
+        'sign_out_date' => '2026-09-22',
+    ])->assertStatus(422)
+        ->assertJsonValidationErrors(['sign_out_date']);
+
+    $this->putJson("/api/vessel-arrivals/{$arrivalBarge->id}", [
+        'sign_out_date' => '2026-09-22',
     ])->assertStatus(422)
         ->assertJsonValidationErrors(['sign_out_date']);
 });

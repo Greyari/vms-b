@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\LocationType;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\VesselArrivalRequest;
 use App\Models\Location;
@@ -15,6 +16,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Spatie\SimpleExcel\SimpleExcelWriter;
 
 class VesselArrivalController extends Controller
@@ -365,8 +367,14 @@ class VesselArrivalController extends Controller
         $validated = $request->validated();
         $user = $request->user();
 
-        $arrival = DB::transaction(function () use ($validated, $user) {
-            $location = Location::find($validated['location_id']);
+        $location = Location::find($validated['location_id']);
+        if (! empty($validated['sign_out_date']) && $this->isStayingVessel($location)) {
+            throw ValidationException::withMessages([
+                'sign_out_date' => ['Kapal tipe Tugboat dan Barge berstatus operasional menetap (Stay) dan tidak dapat di-check-out.'],
+            ]);
+        }
+
+        $arrival = DB::transaction(function () use ($validated, $user, $location) {
             $validated['vessel_name'] = $validated['vessel_name'] ?? $location?->name;
 
             if (empty($validated['captain']) && ! empty($location?->captain)) {
@@ -477,6 +485,14 @@ class VesselArrivalController extends Controller
         $arrival = VesselArrival::findOrFail($id);
         $validated = $request->validated();
         $user = $request->user();
+
+        $targetLocationId = $validated['location_id'] ?? $arrival->location_id;
+        $targetLocation = Location::find($targetLocationId);
+        if (! empty($validated['sign_out_date']) && $this->isStayingVessel($targetLocation)) {
+            throw ValidationException::withMessages([
+                'sign_out_date' => ['Kapal tipe Tugboat dan Barge berstatus operasional menetap (Stay) dan tidak dapat di-check-out.'],
+            ]);
+        }
 
         DB::transaction(function () use ($arrival, $validated, $user) {
             $wasInPort = $arrival->sign_out_date === null;
@@ -702,5 +718,15 @@ class VesselArrivalController extends Controller
         $arrival->delete();
 
         return response()->json(['message' => 'Vessel arrival deleted successfully']);
+    }
+
+    protected function isStayingVessel(?Location $location): bool
+    {
+        if (! $location) {
+            return false;
+        }
+
+        return in_array($location->type, [LocationType::TugBoat, LocationType::Barge], true)
+            || in_array($location->vessel_type, ['tug_boat', 'barge'], true);
     }
 }

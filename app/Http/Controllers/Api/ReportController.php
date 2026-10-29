@@ -13,6 +13,7 @@ use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Spatie\SimpleExcel\SimpleExcelWriter;
 
 class ReportController extends Controller
@@ -547,14 +548,31 @@ class ReportController extends Controller
     public function exportCrewPdf(Request $request)
     {
         $mode = $request->input('mode', 'placements');
-        $query = ($mode === 'history' || $mode === 'logs')
-            ? $this->buildCrewLogsQuery($request)
-            : $this->buildCrewQuery($request);
+
+        if ($mode === 'history' || $mode === 'logs') {
+            $query = $this->buildCrewLogsQuery($request)
+                ->join('visitors', 'vessel_arrival_crew_logs.visitor_id', '=', 'visitors.id')
+                ->select('vessel_arrival_crew_logs.*')
+                ->reorder()
+                ->orderBy('visitors.name', 'asc')
+                ->orderBy('vessel_arrival_crew_logs.logged_at', 'asc');
+
+            $logs = $query->get();
+            $records = $this->transformCrewLogsToSessions($logs);
+        } else {
+            $query = $this->buildCrewQuery($request)
+                ->join('visitors', 'vessel_arrival_crew.visitor_id', '=', 'visitors.id')
+                ->select('vessel_arrival_crew.*')
+                ->reorder()
+                ->orderBy('visitors.name', 'asc')
+                ->orderBy('vessel_arrival_crew.checked_in_at', 'asc')
+                ->orderBy('vessel_arrival_crew.created_at', 'asc');
+
+            $records = $query->get();
+        }
 
         @ini_set('memory_limit', '512M');
         @set_time_limit(300);
-
-        $records = $query->get();
 
         $startDate = $request->input('date_from', $request->input('start_date'));
         $endDate = $request->input('date_to', $request->input('end_date'));
@@ -566,6 +584,79 @@ class ReportController extends Controller
         $filename = ($mode === 'history' || $mode === 'logs') ? 'vessel-crew-history-report.pdf' : 'vessel-crew-report.pdf';
 
         return $pdf->download($filename);
+    }
+
+    /**
+     * Transform individual activity logs into paired in-out sessions per crew member.
+     *
+     * @param  Collection<int, VesselArrivalCrewLog>  $logs
+     * @return Collection<int, object>
+     */
+    public function transformCrewLogsToSessions($logs)
+    {
+        $groupedByVisitor = $logs->groupBy('visitor_id');
+        $sessions = collect();
+
+        foreach ($groupedByVisitor as $visitorId => $visitorLogs) {
+            $sortedLogs = $visitorLogs->sortBy(fn ($l) => $l->logged_at ? Carbon::parse($l->logged_at)->timestamp : 0)->values();
+            $openCheckIns = [];
+
+            foreach ($sortedLogs as $log) {
+                if ($log->action === 'check_in') {
+                    $openCheckIns[] = $log;
+                } elseif ($log->action === 'check_out') {
+                    if (! empty($openCheckIns)) {
+                        $checkInLog = array_shift($openCheckIns);
+                        $sessions->push((object) [
+                            'visitor' => $checkInLog->visitor,
+                            'vesselArrival' => $checkInLog->vesselArrival,
+                            'checked_in_at' => $checkInLog->logged_at,
+                            'checked_out_at' => $log->logged_at,
+                            'status' => 'checked_out',
+                            'performed_by_name' => $log->performed_by_name ?: $checkInLog->performed_by_name,
+                            'notes' => $log->notes ?: $checkInLog->notes,
+                        ]);
+                    } else {
+                        $sessions->push((object) [
+                            'visitor' => $log->visitor,
+                            'vesselArrival' => $log->vesselArrival,
+                            'checked_in_at' => null,
+                            'checked_out_at' => $log->logged_at,
+                            'status' => 'checked_out',
+                            'performed_by_name' => $log->performed_by_name,
+                            'notes' => $log->notes,
+                        ]);
+                    }
+                }
+            }
+
+            // Remaining open check-ins (currently onboard)
+            foreach ($openCheckIns as $openLog) {
+                $sessions->push((object) [
+                    'visitor' => $openLog->visitor,
+                    'vesselArrival' => $openLog->vesselArrival,
+                    'checked_in_at' => $openLog->logged_at,
+                    'checked_out_at' => null,
+                    'status' => 'checked_in',
+                    'performed_by_name' => $openLog->performed_by_name,
+                    'notes' => $openLog->notes,
+                ]);
+            }
+        }
+
+        return $sessions->sort(function ($a, $b) {
+            $nameA = strtolower(trim((string) ($a->visitor?->name ?? '')));
+            $nameB = strtolower(trim((string) ($b->visitor?->name ?? '')));
+            $cmpName = strcmp($nameA, $nameB);
+            if ($cmpName !== 0) {
+                return $cmpName;
+            }
+
+            $timeA = $a->checked_in_at ? Carbon::parse($a->checked_in_at)->timestamp : ($a->checked_out_at ? Carbon::parse($a->checked_out_at)->timestamp : 0);
+            $timeB = $b->checked_in_at ? Carbon::parse($b->checked_in_at)->timestamp : ($b->checked_out_at ? Carbon::parse($b->checked_out_at)->timestamp : 0);
+
+            return $timeA <=> $timeB;
+        })->values();
     }
 
     public function buildCrewQuery(Request $request): Builder

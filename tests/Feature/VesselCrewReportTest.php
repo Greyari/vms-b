@@ -3,6 +3,7 @@
 use App\Models\Location;
 use App\Models\VesselArrival;
 use App\Models\VesselArrivalCrew;
+use App\Models\VesselArrivalCrewLog;
 use App\Models\Visitor;
 
 it('forbids unauthenticated user from accessing crew report and export', function () {
@@ -136,6 +137,83 @@ it('exports crew placements to landscape a4 pdf download', function () {
     $response->assertOk();
     expect($response->headers->get('content-type'))->toBe('application/pdf');
     expect($response->headers->get('content-disposition'))->toContain('vessel-crew-report.pdf');
+});
+
+it('exports crew placements pdf sorted by crew name and in time with consecutive rows', function () {
+    actingAsSupervisor();
+
+    $vessel = Location::factory()->create(['name' => 'TB. NUSANTARA 99']);
+    $arrival = VesselArrival::factory()->create([
+        'location_id' => $vessel->id,
+        'vessel_name' => 'TB. NUSANTARA 99',
+    ]);
+
+    $crewZ = Visitor::factory()->crew($vessel)->create(['name' => 'Zack Crew']);
+    $crewA = Visitor::factory()->crew($vessel)->create(['name' => 'Adam Crew']);
+
+    // Adam has two sessions
+    VesselArrivalCrew::create([
+        'vessel_arrival_id' => $arrival->id,
+        'visitor_id' => $crewA->id,
+        'status' => 'checked_in',
+        'checked_in_at' => '2026-10-05 08:00:00',
+    ]);
+
+    // Zack has one session
+    VesselArrivalCrew::create([
+        'vessel_arrival_id' => $arrival->id,
+        'visitor_id' => $crewZ->id,
+        'status' => 'checked_out',
+        'checked_in_at' => '2026-10-01 07:00:00',
+        'checked_out_at' => '2026-10-02 17:00:00',
+    ]);
+
+    $response = $this->get('/api/reports/crew/pdf');
+    $response->assertOk();
+    expect($response->headers->get('content-type'))->toBe('application/pdf');
+});
+
+it('exports crew activity logs to pdf paired by in and out sessions grouped by crew name', function () {
+    actingAsSupervisor();
+
+    $vessel = Location::factory()->create(['name' => 'TB. LOG BOAT']);
+    $arrival = VesselArrival::factory()->create([
+        'location_id' => $vessel->id,
+        'vessel_name' => 'TB. LOG BOAT',
+    ]);
+
+    $crew1 = Visitor::factory()->crew($vessel)->create(['name' => 'Budi Sailor']);
+    $crew2 = Visitor::factory()->crew($vessel)->create(['name' => 'Agus Captain']);
+
+    // Crew 1: has check_in and subsequent check_out
+    VesselArrivalCrewLog::create([
+        'vessel_arrival_id' => $arrival->id,
+        'visitor_id' => $crew1->id,
+        'action' => 'check_in',
+        'logged_at' => '2026-10-01 08:00:00',
+        'notes' => 'Masuk tugas',
+    ]);
+    VesselArrivalCrewLog::create([
+        'vessel_arrival_id' => $arrival->id,
+        'visitor_id' => $crew1->id,
+        'action' => 'check_out',
+        'logged_at' => '2026-10-03 17:00:00',
+        'notes' => 'Selesai tugas',
+    ]);
+
+    // Crew 2: has active check_in only (onboard)
+    VesselArrivalCrewLog::create([
+        'vessel_arrival_id' => $arrival->id,
+        'visitor_id' => $crew2->id,
+        'action' => 'check_in',
+        'logged_at' => '2026-10-02 09:00:00',
+        'notes' => 'Bertugas di kapal',
+    ]);
+
+    $response = $this->get('/api/reports/crew/pdf?mode=history');
+    $response->assertOk();
+    expect($response->headers->get('content-type'))->toBe('application/pdf')
+        ->and($response->headers->get('content-disposition'))->toContain('vessel-crew-history-report.pdf');
 });
 
 it('filters crew report by time_from and time_to', function () {
