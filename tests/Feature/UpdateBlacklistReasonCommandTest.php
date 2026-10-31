@@ -61,9 +61,9 @@ class UpdateBlacklistReasonCommandTest extends TestCase
             ->assertExitCode(0);
 
         // Verify data was replaced
-        $this->assertEquals('blok by management for safety breach', $visitor->fresh()->blacklist_reason);
-        $this->assertEquals('blok by management', $blacklist->fresh()->offences);
-        $this->assertEquals('Prior incident - blok by management', $blacklist->fresh()->remark);
+        $this->assertEquals('blok by asl management for safety breach', $visitor->fresh()->blacklist_reason);
+        $this->assertEquals('blok by asl management', $blacklist->fresh()->offences);
+        $this->assertEquals('Prior incident - blok by asl management', $blacklist->fresh()->remark);
     }
 
     public function test_it_supports_custom_from_and_to_parameters(): void

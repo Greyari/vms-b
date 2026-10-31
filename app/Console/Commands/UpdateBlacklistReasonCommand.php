@@ -15,7 +15,7 @@ class UpdateBlacklistReasonCommand extends Command
      */
     protected $signature = 'vms:update-blacklist-reason
                             {--from=Blacklisted by ASL Management : Teks lama yang ingin diganti}
-                            {--to=blok by management : Teks baru pengganti}
+                            {--to=blok by asl management : Teks baru pengganti}
                             {--dry-run : Pratinjau perubahan tanpa mengubah data di database}';
 
     /**
@@ -23,7 +23,7 @@ class UpdateBlacklistReasonCommand extends Command
      *
      * @var string
      */
-    protected $description = 'Memperbarui kalimat alasan blacklist di database produksi (misal: Blacklisted by ASL Management -> blok by management)';
+    protected $description = 'Memperbarui kalimat alasan blacklist di database produksi (misal: Blacklisted by ASL Management -> blok by asl management)';
 
     public function handle(): int
     {
