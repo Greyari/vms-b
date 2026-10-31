@@ -1,12 +1,15 @@
 <?php
 
+use App\Models\Blacklist;
 use App\Models\Location;
+use App\Models\Role;
 use App\Models\Staff;
 use App\Models\User;
 use App\Models\VesselArrival;
 use App\Models\Visit;
 use App\Models\Visitor;
 use App\Models\VisitorCard;
+use Laravel\Sanctum\Sanctum;
 
 it('forbids a security-role user from creating staff (403 JSON)', function () {
     actingAsSecurity();
@@ -160,4 +163,34 @@ it('allows operator_pos role to check out visits and check in/out crew but forbi
     $this->postJson("/api/vessel-arrivals/{$arrival->id}/crew/check-out", [
         'crew_ids' => [$crew->id],
     ])->assertOk();
+});
+
+it('allows users with manage_blacklist permission to view blacklisted visitors and global blacklists', function () {
+    $visitor = Visitor::factory()->create([
+        'name' => 'Blacklisted Person',
+    ]);
+    Blacklist::create([
+        'visitor_id' => $visitor->id,
+        'name' => $visitor->name,
+        'id_number' => $visitor->id_number,
+        'offences' => 'Confidential security breach',
+        'remark' => 'Top secret remark',
+        'blacklisted_at' => now()->toDateString(),
+        'is_active' => true,
+    ]);
+
+    // Create a user who ONLY has manage_blacklist (not view_visitors)
+    $supervisor = User::factory()->create();
+    $role = Role::create(['name' => 'blacklist_supervisor']);
+    $role->syncPermissions(['manage_blacklist']);
+    $supervisor->assignRole($role);
+
+    Sanctum::actingAs($supervisor);
+
+    $response = $this->getJson('/api/visitors/blacklisted')->assertOk();
+    expect($response->json('data.0.name'))->toBe('Blacklisted Person');
+    expect($response->json('data.0.offences'))->toBe('Confidential security breach');
+    expect($response->json('data.0.remark'))->toBe('Top secret remark');
+
+    $this->getJson('/api/global-blacklists')->assertOk();
 });

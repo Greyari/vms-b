@@ -85,7 +85,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/visits', [VisitController::class, 'store'])->middleware('permission:create_visits');
 
     Route::get('/pre-registrations/{token}', [PreRegistrationController::class, 'show'])->middleware('permission:create_visits');
-    Route::get('/global-blacklists', [GlobalBlacklistController::class, 'index'])->middleware('permission:view_visitors');
+    Route::get('/global-blacklists', [GlobalBlacklistController::class, 'index'])->middleware('permission:view_visitors|manage_blacklist');
     Route::middleware('permission:manage_blacklist')->group(function () {
         Route::get('/global-blacklists/outbox', [GlobalBlacklistController::class, 'outbox']);
         Route::post('/global-blacklists', [GlobalBlacklistController::class, 'store']);
@@ -101,7 +101,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // --- Visitors -------------------------------------------------------
     Route::get('/visitors', [VisitorController::class, 'index'])->middleware('permission:view_visitors');
     Route::get('/visitors/search', [VisitorController::class, 'search'])->middleware('permission:view_visitors');
-    Route::get('/visitors/blacklisted', [VisitorController::class, 'blacklisted'])->middleware('permission:view_visitors');
+    Route::get('/visitors/blacklisted', [VisitorController::class, 'blacklisted'])->middleware('permission:view_visitors|manage_blacklist');
     Route::get('/visitors/{id}', [VisitorController::class, 'show'])->middleware('permission:view_visitors')->whereUuid('id');
     Route::post('/visitors', [VisitorController::class, 'store'])->middleware('permission:create_visitors');
     Route::get('/visitors/{id}/visits', [VisitorController::class, 'visits'])->middleware('permission:view_visitors')->whereUuid('id');
